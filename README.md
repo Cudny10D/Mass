@@ -9,10 +9,6 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License">
 </p>
 
-<p align="center">
-  <img src="docs/screenshot-main.png" width="720" alt="主界面">
-</p>
-
 
 ---
 
