@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <img src="<img width="1225" height="808" alt="QQ_1790847283999" src="https://github.com/user-attachments/assets/846797aa-ed97-47f0-9e2b-48b0668885f8" />
-" width="720" alt="主界面">
+  <img src="<img width="1228" height="807" alt="QQ_1790847472586" src="https://github.com/user-attachments/assets/564c120e-4fb1-4a1b-a1be-38c79ecc84d2" />
+  " width="720" alt="主界面">
 </p>
 
 ---
@@ -37,15 +37,15 @@
 
 | 主界面 | 全屏播放器 |
 |:---:|:---:|
-| ![主界面](<img width="1231" height="809" alt="QQ_1790847121500" src="https://github.com/user-attachments/assets/8453ab84-1183-4181-8b0c-613f49568784" />
-) | ![全屏播放器](<img width="1230" height="809" alt="QQ_1790847172701" src="https://github.com/user-attachments/assets/3329c977-ba3c-43a3-b64a-f928eac18f67" />
-) |
+| ![主界面]<img width="1231" height="809" alt="QQ_1790847121500" src="https://github.com/user-attachments/assets/8453ab84-1183-4181-8b0c-613f49568784" />
+| ![全屏播放器]<img width="1230" height="809" alt="QQ_1790847172701" src="https://github.com/user-attachments/assets/3329c977-ba3c-43a3-b64a-f928eac18f67" />
+|
 
 | 搜索 | 歌单 |
 |:---:|:---:|
-| ![搜索](<img width="1229" height="809" alt="QQ_1790847196376" src="https://github.com/user-attachments/assets/0d905667-d406-417d-9b21-b22d41bd51f1" />
-) | ![歌单](<img width="1228" height="809" alt="QQ_1790847216302" src="https://github.com/user-attachments/assets/3e6a139f-7d5a-491d-b487-f003cc613396" />
-) |
+| ![搜索]<img width="1229" height="809" alt="QQ_1790847196376" src="https://github.com/user-attachments/assets/0d905667-d406-417d-9b21-b22d41bd51f1" />
+| ![歌单]<img width="1228" height="809" alt="QQ_1790847216302" src="https://github.com/user-attachments/assets/3e6a139f-7d5a-491d-b487-f003cc613396" />
+|
 
 ---
 
