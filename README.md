@@ -10,8 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="<img width="1228" height="807" alt="QQ_1790847472586" src="https://github.com/user-attachments/assets/564c120e-4fb1-4a1b-a1be-38c79ecc84d2" />
-  " width="720" alt="主界面">
+  <img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"> </p><p align="center"> <img src="docs/screenshot-main.png" width="720" alt="主界面"> </p>
 </p>
 
 ---
