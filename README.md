@@ -10,8 +10,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/License-MIT-yellow" alt="MIT License"> </p><p align="center"> <img src="docs/screenshot-main.png" width="720" alt="主界面"> </p>
+  <img src="docs/screenshot-main.png" width="720" alt="主界面">
 </p>
+
 
 ---
 
@@ -83,8 +84,8 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/Cudny/ArknightsMusicPlayer.git
-cd ArknightsMusicPlayer
+git clone https://github.com/Cudny10D/Mass.git
+cd Mass
 ```
 
 ### 2. 准备 API 服务
@@ -137,7 +138,7 @@ powershell -ExecutionPolicy Bypass -File make-dist.ps1
 
 ## 📥 下载安装
 
-从 [Releases](https://github.com/Cudny/ArknightsMusicPlayer/releases) 页面下载最新的 `Mass_Setup_x.y.z.exe`，双击安装。
+从 [Releases](https://github.com/Cudny10D/Mass/releases) 页面下载最新的 `Mass_Setup_x.y.z.exe`，双击安装。
 
 **系统要求**：Windows 10 / 11 64 位
 
@@ -221,13 +222,13 @@ ArknightsMusicPlayer/
 
 ## 📄 许可证
 
-MIT License © 2026 [Cudny](https://github.com/Cudny)
+MIT License © 2026 [Cudny10D](https://github.com/Cudny10D)
 
 本项目仅供学习交流使用。所有音乐版权归 [塞壬唱片 / Monster Siren Records](https://monster-siren.hypergryph.com/) 所有。
 
 ---
 
 <p align="center">
-  Made with ❤️ by <a href="https://github.com/Cudny">Cudny</a>
+  Made with ❤️ by <a href="https://github.com/Cudny10D">Cudny</a>
 </p>
 
