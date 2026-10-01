@@ -36,14 +36,14 @@
 
 | 主界面 | 全屏播放器 |
 |:---:|:---:|
-| ![主界面]<img width="1231" height="809" alt="QQ_1790847121500" src="https://github.com/user-attachments/assets/8453ab84-1183-4181-8b0c-613f49568784" />
-| ![全屏播放器]<img width="1230" height="809" alt="QQ_1790847172701" src="https://github.com/user-attachments/assets/3329c977-ba3c-43a3-b64a-f928eac18f67" />
+|<img width="1231" height="809" alt="QQ_1790847121500" src="https://github.com/user-attachments/assets/8453ab84-1183-4181-8b0c-613f49568784" />
+|<img width="1230" height="809" alt="QQ_1790847172701" src="https://github.com/user-attachments/assets/3329c977-ba3c-43a3-b64a-f928eac18f67" />
 |
 
 | 搜索 | 歌单 |
 |:---:|:---:|
-| ![搜索]<img width="1229" height="809" alt="QQ_1790847196376" src="https://github.com/user-attachments/assets/0d905667-d406-417d-9b21-b22d41bd51f1" />
-| ![歌单]<img width="1228" height="809" alt="QQ_1790847216302" src="https://github.com/user-attachments/assets/3e6a139f-7d5a-491d-b487-f003cc613396" />
+|<img width="1229" height="809" alt="QQ_1790847196376" src="https://github.com/user-attachments/assets/0d905667-d406-417d-9b21-b22d41bd51f1" />
+|<img width="1228" height="809" alt="QQ_1790847216302" src="https://github.com/user-attachments/assets/3e6a139f-7d5a-491d-b487-f003cc613396" />
 |
 
 ---
@@ -224,5 +224,4 @@ MIT License © 2026 [Cudny](https://github.com/Cudny)
 <p align="center">
   Made with ❤️ by <a href="https://github.com/Cudny">Cudny</a>
 </p>
-```
 
