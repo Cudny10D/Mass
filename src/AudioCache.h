@@ -18,14 +18,6 @@ public:
     Q_INVOKABLE void clearAll();
     Q_INVOKABLE qint64 totalSize() const;
 
-    Q_INVOKABLE bool ffmpegAvailable() const { return !m_ffmpegPath.isEmpty(); }
-    Q_INVOKABLE QString ffmpegPath() const { return m_ffmpegPath; }
-    Q_INVOKABLE int activeDownloads() const { return m_activeDownloads; }
-
-    // ★ 限制下载速度（字节/秒），-1 表示不限速
-    Q_INVOKABLE void setSpeedLimit(qint64 bytesPerSec);
-    Q_INVOKABLE qint64 speedLimit() const { return m_speedLimitBytes; }
-
     Q_INVOKABLE bool downloadToLibrary(const QString &cid,
                                         const QString &songName,
                                         const QString &artist,
@@ -57,12 +49,6 @@ private:
         QString coverUrl;
     };
 
-    // ★ 每个下载的限速窗口状态
-    struct SpeedState {
-        qint64 bytesThisSecond = 0;
-        qint64 windowStart = 0;
-    };
-
     QString m_cacheDir;
     QString m_ffmpegPath;
     QSet<QString> m_downloading;
@@ -71,13 +57,9 @@ private:
     int m_activeDownloads = 0;
 
     QHash<QString, LibraryTarget> m_libraryTargets;
-    QHash<QString, SpeedState> m_speedStates;
 
     qint64 m_maxCacheSize = 2LL * 1024 * 1024 * 1024;
     static constexpr int MAX_CONCURRENT_DOWNLOADS = 2;
-
-    // ★ 下载限速（默认 512 KB/s），-1 = 不限速
-    qint64 m_speedLimitBytes = 512 * 1024;
 
     QNetworkAccessManager *m_manager;
 

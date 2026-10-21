@@ -1,4 +1,5 @@
 #include "NetworkManager.h"
+#include <QSettings>
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QNetworkDiskCache>
@@ -84,19 +85,33 @@ NetworkManager::NetworkManager(QObject *parent)
     QString cachePath = QStandardPaths::writableLocation(
         QStandardPaths::CacheLocation) + "/http";
     m_diskCache->setCacheDirectory(cachePath);
-    m_diskCache->setMaximumCacheSize(1024 * 1024 * 1024);  // 1 GB
+    m_diskCache->setMaximumCacheSize(QSettings("ArknightsMusicPlayer", "settings").value("cache/httpMb", 128).toInt() * 1024 * 1024);   // 128 MB
     m_manager->setCache(m_diskCache);
 
     qDebug() << "[Network] HTTP disk cache at:" << cachePath;
-    qDebug() << "[Network] HTTP cache size limit: 1024 MB";
+    qDebug() << "[Network] HTTP cache size limit: 128 MB";
     qDebug() << "[Network] API base URL:" << BASE_URL;
 }
 
+void NetworkManager::setImageCache(QNetworkDiskCache *cache) {
+    m_imageCache = cache;
+}
+
+void NetworkManager::setQmlManager(QNetworkAccessManager *nam) {
+    m_qmlManager = nam;
+}
+
+QNetworkAccessManager *NetworkManager::coverManager() const {
+    return m_qmlManager ? m_qmlManager.data() : m_manager;
+}
+
 // ============================================================
-// HTTP 缓存：查询大小
+// HTTP 缓存：查询大小（含封面）
 // ============================================================
 qint64 NetworkManager::httpCacheSize() const {
-    return m_diskCache ? m_diskCache->cacheSize() : 0;
+    qint64 size = m_diskCache ? m_diskCache->cacheSize() : 0;
+    if (m_imageCache) size += m_imageCache->cacheSize();
+    return size;
 }
 
 // ============================================================
@@ -105,6 +120,9 @@ qint64 NetworkManager::httpCacheSize() const {
 void NetworkManager::clearHttpCache() {
     if (m_diskCache) {
         m_diskCache->clear();
+    }
+    if (m_imageCache) {
+        m_imageCache->clear();
     }
     clearCaches();   // 清内存级
     qDebug() << "[Network] HTTP + memory caches cleared";
@@ -506,4 +524,114 @@ void NetworkManager::clearCaches() {
     m_allAlbums = QJsonArray();
     m_allAlbumsLoaded = false;
     qDebug() << "[Cache] memory caches cleared";
+}
+
+// ============================================================
+// 网易云歌词
+// ============================================================
+void NetworkManager::fetchNeteaseLyric(const QString &cid,
+                                        const QString &songName,
+                                        const QString &artist) {
+    if (songName.trimmed().isEmpty()) return;
+
+    QUrl url("http://music.163.com/api/search/get");
+    QUrlQuery q;
+    q.addQueryItem("s", songName);
+    q.addQueryItem("type", "1");
+    q.addQueryItem("limit", "10");
+    q.addQueryItem("offset", "0");
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::UserAgentHeader, kUserAgent);
+    req.setRawHeader("Referer", "https://music.163.com/");
+    req.setRawHeader("Cookie", "appver=8.9.70; os=pc;");
+    req.setRawHeader("Accept", "application/json, text/plain, */*");
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    req.setTransferTimeout(15000);
+
+    QNetworkReply *reply = m_manager->get(req);
+    QObject::connect(reply, &QNetworkReply::finished, this,
+                     [this, reply, cid, artist]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qDebug() << "[Netease] search failed:" << reply->errorString();
+            emit neteaseLyricFailed(cid, reply->errorString());
+            return;
+        }
+
+        const QJsonArray songs = QJsonDocument::fromJson(reply->readAll())
+                                     .object().value("result").toObject()
+                                     .value("songs").toArray();
+        if (songs.isEmpty()) {
+            emit neteaseLyricFailed(cid, QStringLiteral("网易云未找到该歌曲"));
+            return;
+        }
+
+        // 优先取艺术家匹配的候选，否则退回第一条
+        const QString want = artist.trimmed().toLower();
+        QString songId;
+        for (const auto &v : songs) {
+            const QJsonObject s = v.toObject();
+            if (!want.isEmpty()) {
+                QStringList names;
+                for (const auto &a : s.value("artists").toArray())
+                    names << a.toObject().value("name").toString();
+                if (!names.join(' ').toLower().contains(want)) continue;
+            }
+            songId = QString::number(
+                s.value("id").toVariant().toLongLong());
+            break;
+        }
+        if (songId.isEmpty()) {
+            songId = QString::number(songs.first().toObject()
+                                         .value("id").toVariant().toLongLong());
+        }
+
+        requestNeteaseLyricById(cid, songId);
+    });
+}
+
+void NetworkManager::requestNeteaseLyricById(const QString &cid,
+                                              const QString &songId) {
+    QUrl url("http://music.163.com/api/song/lyric");
+    QUrlQuery q;
+    q.addQueryItem("id", songId);
+    q.addQueryItem("lv", "-1");
+    q.addQueryItem("tv", "-1");
+    q.addQueryItem("os", "pc");
+    url.setQuery(q);
+
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::UserAgentHeader, kUserAgent);
+    req.setRawHeader("Referer", "https://music.163.com/");
+    req.setRawHeader("Cookie", "appver=8.9.70; os=pc;");
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    req.setTransferTimeout(15000);
+
+    QNetworkReply *reply = m_manager->get(req);
+    QObject::connect(reply, &QNetworkReply::finished, this,
+                     [this, reply, cid]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            qDebug() << "[Netease] lyric failed:" << reply->errorString();
+            emit neteaseLyricFailed(cid, reply->errorString());
+            return;
+        }
+
+        const QJsonObject root =
+            QJsonDocument::fromJson(reply->readAll()).object();
+        const QString lrc  = root.value("lrc").toObject()
+                                 .value("lyric").toString();
+        const QString tlrc = root.value("tlyric").toObject()
+                                 .value("lyric").toString();
+        if (lrc.isEmpty() && tlrc.isEmpty()) {
+            emit neteaseLyricFailed(cid, QStringLiteral("网易云无歌词"));
+            return;
+        }
+
+        qDebug() << "[Netease] lyrics ready:" << cid
+                 << "lrc" << lrc.size() << "tlyric" << tlrc.size();
+        emit neteaseLyricReady(cid, lrc, tlrc);
+    });
 }

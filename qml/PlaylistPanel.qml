@@ -13,6 +13,14 @@ Item {
     signal requestClose()
     signal songSelected(int index)
 
+    // ★ 供 Main.qml 使用 —— picker 是否可见
+    readonly property bool pickerVisible: pickerDialog.visible
+
+    function closePicker() {
+        pickerDialog.close()
+    }
+
+    // 遮罩
     Rectangle {
         anchors.fill: parent
         color: "#000000"
@@ -27,22 +35,55 @@ Item {
         }
     }
 
+    // 面板开关时切换进出场动画。窗口尺寸变化不会走到这里，
+    // 所以最大化不会把面板误当成一次「打开」。
+    onOpenChanged: {
+        if (open) {
+            panelShift.x = panel.width
+            panelOpenAnim.start()
+        } else {
+            panelCloseAnim.start()
+        }
+    }
+
+    // 右侧面板
     Item {
         id: panel
         y: 0
         height: parent.height
-        width: 400
+        width: 380
 
-        x: root.open ? (parent.width - width) : parent.width
+        // 关键：面板必须锚在窗口右边缘，进出场靠 transform 平移，
+        // 而不是去绑 x = parent.width - width。
+        // 原来写法的问题是：关闭时面板停在 x = parent.width（窗口外右侧），
+        // 这个 x 绑定挂在 parent.width 上，于是**窗口一最大化**，目标值就从
+        // 1239 跳到 2560，再加上 Behavior on x 的 360ms 动画 —— 面板就会从
+        // 窗口中间一路滑到右边「错位再消失」。锚右边缘后，窗口尺寸变化只是
+        // 让面板跟着右边缘走，offset 不受任何影响，也就不会被误触发。
+        anchors.right: parent.right
         enabled: root.open
 
-        Behavior on x {
-            NumberAnimation {
-                duration: 360
-                easing.type: root.open ? Easing.OutCubic : Easing.InCubic
-            }
+        transform: Translate { id: panelShift; x: root.open ? 0 : panel.width }
+
+        // 只在「开关面板」时做动画；窗口尺寸变化不碰 offset
+        NumberAnimation {
+            id: panelOpenAnim
+            target: panelShift
+            property: "x"
+            to: 0
+            duration: 360
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            id: panelCloseAnim
+            target: panelShift
+            property: "x"
+            to: panel.width
+            duration: 360
+            easing.type: Easing.InCubic
         }
 
+        // 阴影
         Rectangle {
             anchors {
                 fill: bgRect
@@ -51,11 +92,12 @@ Item {
                 leftMargin: -8
                 rightMargin: 4
             }
-            radius: bgRect.radius
+            radius: 0
             color: Theme.shadowDeep
-            opacity: 0.5
+            opacity: 0.22
         }
 
+        // 面板主体
         Rectangle {
             id: bgRect
             anchors {
@@ -65,12 +107,10 @@ Item {
                 leftMargin: 0
                 rightMargin: 12
             }
-            radius: Theme.radiusLarge
-
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Theme.gradientGlass[0] }
-                GradientStop { position: 1.0; color: Theme.gradientGlass[1] }
-            }
+            radius: 0
+            color: Theme.bg
+            border.width: 1
+            border.color: Theme.border
 
             Rectangle {
                 anchors.fill: parent
@@ -98,6 +138,7 @@ Item {
             anchors.fill: bgRect
             spacing: 0
 
+            // 头部
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: 20
@@ -126,7 +167,7 @@ Item {
                 Rectangle {
                     Layout.preferredWidth: 32
                     Layout.preferredHeight: 32
-                    radius: 16
+                    radius: 0
                     color: closeBtn.containsMouse ? Theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
 
@@ -146,9 +187,11 @@ Item {
                 }
             }
 
+            // 空状态
             Column {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.topMargin: 80
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.alignment: Qt.AlignCenter
                 spacing: 12
                 visible: root.queue.length === 0
 
@@ -167,6 +210,7 @@ Item {
                 }
             }
 
+            // 队列
             Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -182,9 +226,6 @@ Item {
                     clip: true
                     spacing: 2
                     model: root.queue
-
-                    // ★ 没有 add / remove / displaced Transition
-                    //   模型变化时瞬时切换，不会重合
 
                     delegate: Item {
                         width: queueList.width
@@ -250,7 +291,7 @@ Item {
                             Rectangle {
                                 Layout.preferredWidth: 36
                                 Layout.preferredHeight: 36
-                                radius: 6
+                                radius: 0
                                 color: Theme.panelAlt
                                 clip: true
 
@@ -301,10 +342,11 @@ Item {
                                 }
                             }
 
+                            // 添加到歌单按钮
                             Rectangle {
                                 Layout.preferredWidth: 26
                                 Layout.preferredHeight: 26
-                                radius: 13
+                                radius: 0
                                 color: addBtnArea.containsMouse ? Theme.accent : "transparent"
                                 border.color: Theme.border
                                 border.width: addBtnArea.containsMouse ? 0 : 1
@@ -316,7 +358,7 @@ Item {
                                     anchors.centerIn: parent
                                     text: "+"
                                     color: addBtnArea.containsMouse
-                                           ? (Theme.darkMode ? "#000000" : "#ffffff")
+                                           ? (Theme.ink)
                                            : Theme.textDim
                                     font {
                                         family: Theme.fontFamily
@@ -342,6 +384,7 @@ Item {
                                 }
                             }
 
+                            // 播放指示
                             Text {
                                 Layout.preferredWidth: 18
                                 text: isCurrent ? "▶" : ""

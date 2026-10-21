@@ -5,6 +5,8 @@
 #include <QJsonObject>
 #include <QHash>
 #include <QString>
+#include <QStringList>
+#include <QPointer>
 #include <functional>
 
 class QNetworkDiskCache;
@@ -22,6 +24,13 @@ public:
     Q_INVOKABLE qint64 httpCacheSize() const;
     Q_INVOKABLE void clearHttpCache();
 
+    // QML 图片缓存（工厂创建并持有，这里只登记）
+    void setImageCache(QNetworkDiskCache *cache);
+
+    // 封面预取用的 QNAM
+    void setQmlManager(QNetworkAccessManager *nam);
+    QNetworkAccessManager *coverManager() const;
+
     Q_INVOKABLE void getAllAlbums();
     Q_INVOKABLE void searchAlbums(const QString &keyword);
     Q_INVOKABLE void searchAlbumsWithPage(const QString &keyword,
@@ -31,6 +40,11 @@ public:
     Q_INVOKABLE void prefetchSongInfo(const QString &songCid);
     Q_INVOKABLE void clearCaches();
 
+    // 网易云歌词：按歌名 / 艺术家搜索，取回 LRC 与官方中文翻译（tlyric）
+    Q_INVOKABLE void fetchNeteaseLyric(const QString &cid,
+                                       const QString &songName,
+                                       const QString &artist);
+
 signals:
     void albumsReady(const QJsonArray &albums);
     void albumDetailReady(const QString &albumCid, const QJsonArray &songs);
@@ -39,10 +53,16 @@ signals:
     void songUrlPrefetched(const QString &songCid, const QString &url);
     void searchAlbumsReady(const QJsonArray &albums, bool hasMore);
     void searchAlbumsFailed(const QString &error);
+    void neteaseLyricReady(const QString &cid,
+                           const QString &lrc,
+                           const QString &tlyric);
+    void neteaseLyricFailed(const QString &cid, const QString &error);
 
 private:
     QNetworkAccessManager *m_manager;
     QNetworkDiskCache *m_diskCache = nullptr;
+    QPointer<QNetworkDiskCache> m_imageCache;
+    QPointer<QNetworkAccessManager> m_qmlManager;
 
     const QString BASE_URL = "http://localhost:3000";
 
@@ -71,4 +91,5 @@ private:
     void doLocalSearch(const QString &keyword);
     void fetchSongInfoInternal(const QString &songCid, bool isPrefetch);
     QJsonArray parseAlbumSongs(const QJsonObject &o);
+    void requestNeteaseLyricById(const QString &cid, const QString &songId);
 };

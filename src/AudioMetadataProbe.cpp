@@ -37,21 +37,6 @@ void AudioMetadataProbe::probe(const QString &cid, const QString &url) {
     doRequest(cid);
 }
 
-bool AudioMetadataProbe::hasResult(const QString &cid) const {
-    return m_results.contains(cid);
-}
-qint64 AudioMetadataProbe::getDurationMs(const QString &cid) const {
-    auto it = m_results.find(cid);
-    return it != m_results.end() ? it->durationMs : -1;
-}
-int AudioMetadataProbe::getSampleRate(const QString &cid) const {
-    auto it = m_results.find(cid);
-    return it != m_results.end() ? it->sampleRate : 0;
-}
-int AudioMetadataProbe::getChannels(const QString &cid) const {
-    auto it = m_results.find(cid);
-    return it != m_results.end() ? it->channels : 0;
-}
 void AudioMetadataProbe::clearCache() {
     m_results.clear();
     qDebug() << "[Probe] cache cleared";

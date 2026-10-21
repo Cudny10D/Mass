@@ -9,7 +9,6 @@
 #include <QCoreApplication>
 #include <QSettings>
 #include <QRegularExpression>
-#include <QDateTime>
 #include <QDebug>
 
 static const char *kUserAgent =
@@ -33,7 +32,6 @@ AudioCache::AudioCache(QNetworkAccessManager *sharedManager, QObject *parent)
     detectFfmpeg();
 
     qDebug() << "[AudioCache] dir =" << m_cacheDir;
-    qDebug() << "[AudioCache] speed limit =" << m_speedLimitBytes / 1024 << "KB/s";
 
     connect(this, &AudioCache::downloadFinished,
             this, &AudioCache::onCacheDownloadFinished);
@@ -47,12 +45,6 @@ AudioCache::AudioCache(QNetworkAccessManager *sharedManager, QObject *parent)
     });
 
     enforceCacheLimit();
-}
-
-void AudioCache::setSpeedLimit(qint64 bytesPerSec) {
-    m_speedLimitBytes = bytesPerSec;
-    qDebug() << "[AudioCache] speed limit set to"
-             << bytesPerSec / 1024 << "KB/s";
 }
 
 void AudioCache::ensureCacheDir() {
@@ -116,12 +108,8 @@ void AudioCache::download(const QString &cid, const QString &url) {
         emit downloadFinished(cid, getLocalPath(cid));
         return;
     }
-
     if (m_downloading.contains(cid)) return;
-
-    for (const auto &p : m_queue) {
-        if (p.cid == cid) return;
-    }
+    for (const auto &p : m_queue) if (p.cid == cid) return;
 
     m_downloading.insert(cid);
     m_queue.enqueue({cid, url});
@@ -129,8 +117,7 @@ void AudioCache::download(const QString &cid, const QString &url) {
 }
 
 void AudioCache::processQueue() {
-    while (m_activeDownloads < MAX_CONCURRENT_DOWNLOADS
-           && !m_queue.isEmpty()) {
+    while (m_activeDownloads < MAX_CONCURRENT_DOWNLOADS && !m_queue.isEmpty()) {
         PendingDownload p = m_queue.dequeue();
         if (hasCache(p.cid)) {
             m_downloading.remove(p.cid);
@@ -144,13 +131,7 @@ void AudioCache::processQueue() {
 }
 
 // ============================================================
-// 实际下载 —— ★ 带限速
-//
-//   限速原理：
-//     1. setReadBufferSize 限制 Qt 内部 socket 缓冲
-//     2. readyRead 回调里用滑动窗口计数
-//        每秒最多读 m_speedLimitBytes 字节
-//        超出配额时数据留在缓冲里，TCP 层会自然减速
+// 实际下载 —— 不限速，直接写入
 // ============================================================
 void AudioCache::startActualDownload(const QString &cid, const QString &url) {
     QNetworkRequest req{QUrl(url)};
@@ -160,9 +141,6 @@ void AudioCache::startActualDownload(const QString &cid, const QString &url) {
                      QNetworkRequest::NoLessSafeRedirectPolicy);
 
     auto *reply = m_manager->get(req);
-
-    // ★ 限制单次 socket 缓冲（64 KB），配合限速使用
-    reply->setReadBufferSize(64 * 1024);
 
     QString finalWav = wavPathFor(cid);
     QString tmpPath  = finalWav + ".part";
@@ -181,44 +159,9 @@ void AudioCache::startActualDownload(const QString &cid, const QString &url) {
         return;
     }
 
-    // ★ readyRead：带限速写入
-    connect(reply, &QNetworkReply::readyRead, this,
-            [this, reply, file, cid]() {
-        if (!file || !file->isOpen()) return;
-        if (m_speedLimitBytes < 0) {
-            // 不限速：全部读入
-            file->write(reply->readAll());
-            return;
-        }
-
-        // 滑动窗口
-        qint64 now = QDateTime::currentMSecsSinceEpoch();
-        auto it = m_speedStates.find(cid);
-        if (it == m_speedStates.end()) {
-            SpeedState st;
-            st.windowStart = now;
-            st.bytesThisSecond = 0;
-            it = m_speedStates.insert(cid, st);
-        }
-
-        if (now - it->windowStart >= 1000) {
-            it->windowStart = now;
-            it->bytesThisSecond = 0;
-        }
-
-        qint64 remaining = m_speedLimitBytes - it->bytesThisSecond;
-        if (remaining <= 0) {
-            // 配额用完 → 不读，让数据留在 socket buffer
-            return;
-        }
-
-        qint64 avail = reply->bytesAvailable();
-        qint64 toRead = qMin(avail, remaining);
-        if (toRead > 0) {
-            QByteArray chunk = reply->read(toRead);
-            file->write(chunk);
-            it->bytesThisSecond += chunk.size();
-        }
+    // ★ 直接写入，无任何限速
+    connect(reply, &QNetworkReply::readyRead, this, [reply, file]() {
+        if (file && file->isOpen()) file->write(reply->readAll());
     });
 
     connect(reply, &QNetworkReply::downloadProgress, this,
@@ -279,7 +222,6 @@ void AudioCache::startActualDownload(const QString &cid, const QString &url) {
 
 void AudioCache::finishDownload(const QString &cid) {
     m_downloading.remove(cid);
-    m_speedStates.remove(cid);   // ★ 清理限速状态
     if (m_activeDownloads > 0) m_activeDownloads--;
     processQueue();
 }
@@ -295,7 +237,6 @@ void AudioCache::enforceCacheLimit() {
         realFiles.append(fi);
         totalSize += fi.size();
     }
-
     if (totalSize <= m_maxCacheSize) return;
 
     for (int i = realFiles.size() - 1; i >= 0; --i) {
@@ -329,7 +270,6 @@ void AudioCache::transcodeToMp3(const QString &cid, const QString &wavPath) {
         "-f", "mp3",
         tmpMp3
     });
-
     proc->setProcessChannelMode(QProcess::MergedChannels);
 
     connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
@@ -343,16 +283,13 @@ void AudioCache::transcodeToMp3(const QString &cid, const QString &wavPath) {
             emit downloadFinished(cid, wavPath);
             return;
         }
-
         QFile::remove(mp3Path);
         if (!QFile::rename(tmpMp3, mp3Path)) {
             QFile::remove(tmpMp3);
             emit downloadFinished(cid, wavPath);
             return;
         }
-
         QFile::remove(wavPath);
-        qDebug() << "[AudioCache] transcode done:" << cid;
         emit transcodeFinished(cid, mp3Path);
         emit downloadFinished(cid, mp3Path);
     });
@@ -373,7 +310,6 @@ void AudioCache::clearAll() {
     m_downloading.clear();
     m_transcoding.clear();
     m_libraryTargets.clear();
-    m_speedStates.clear();
 
     if (m_manager) {
         for (auto *r : m_manager->findChildren<QNetworkReply*>()) {
@@ -382,7 +318,6 @@ void AudioCache::clearAll() {
             r->abort();
         }
     }
-
     for (auto *p : findChildren<QProcess*>()) {
         if (!p) continue;
         p->disconnect(this);
@@ -391,7 +326,6 @@ void AudioCache::clearAll() {
     }
 
     m_activeDownloads = 0;
-
     QDir d(m_cacheDir);
     d.removeRecursively();
     ensureCacheDir();
@@ -407,12 +341,9 @@ qint64 AudioCache::totalSize() const {
 QString AudioCache::downloadDir() const {
     QSettings s("ArknightsMusicPlayer", "settings");
     QString path = s.value("download/path",
-        QStandardPaths::writableLocation(QStandardPaths::MusicLocation))
-        .toString();
-
+        QStandardPaths::writableLocation(QStandardPaths::MusicLocation)).toString();
     QDir d(path);
     if (!d.exists()) d.mkpath(".");
-
     return path;
 }
 
@@ -422,31 +353,25 @@ void AudioCache::writeMetadataAndSave(const QString &cid,
                                        const QString &artist,
                                        const QString &album,
                                        const QString &coverUrl) {
-
     QString targetDir = downloadDir();
-
     QString safeTitle = sanitizeFileName(title);
     QString safeArtist = sanitizeFileName(artist);
     if (safeTitle.isEmpty()) safeTitle = cid;
 
-    QString baseName = safeArtist.isEmpty()
-                       ? safeTitle
-                       : (safeArtist + " - " + safeTitle);
+    QString baseName = safeArtist.isEmpty() ? safeTitle
+                                              : (safeArtist + " - " + safeTitle);
 
     QString dstPath = targetDir + "/" + baseName + ".mp3";
     if (QFile::exists(dstPath)) {
         int n = 1;
         while (QFile::exists(targetDir + "/" + baseName
-                             + " (" + QString::number(n) + ").mp3")) {
-            ++n;
-        }
+                             + " (" + QString::number(n) + ").mp3")) ++n;
         dstPath = targetDir + "/" + baseName
                   + " (" + QString::number(n) + ").mp3";
     }
 
     if (coverUrl.isEmpty() || m_ffmpegPath.isEmpty()) {
-        encodeWithFfmpeg(cid, srcPath, dstPath,
-                         title, artist, album, "");
+        encodeWithFfmpeg(cid, srcPath, dstPath, title, artist, album, "");
         return;
     }
 
@@ -464,9 +389,7 @@ void AudioCache::writeMetadataAndSave(const QString &cid,
 
     connect(reply, &QNetworkReply::readyRead, this, [reply, coverFile]() {
         if (!coverFile->isOpen()) {
-            if (!coverFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-                return;
-            }
+            if (!coverFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
         }
         coverFile->write(reply->readAll());
     });
@@ -485,9 +408,7 @@ void AudioCache::writeMetadataAndSave(const QString &cid,
         } else {
             QFile::remove(coverTemp);
         }
-
-        encodeWithFfmpeg(cid, srcPath, dstPath,
-                         title, artist, album, coverPath);
+        encodeWithFfmpeg(cid, srcPath, dstPath, title, artist, album, coverPath);
     });
 }
 
@@ -499,11 +420,10 @@ void AudioCache::encodeWithFfmpeg(const QString &cid,
                                    const QString &album,
                                    const QString &coverPath) {
     if (m_ffmpegPath.isEmpty()) {
-        if (QFile::copy(srcPath, dstPath)) {
+        if (QFile::copy(srcPath, dstPath))
             emit libraryDownloadFinished(cid, dstPath);
-        } else {
+        else
             emit libraryDownloadFailed(cid, "复制文件失败");
-        }
         if (coverPath.startsWith(QDir::tempPath())) QFile::remove(coverPath);
         return;
     }
@@ -517,71 +437,46 @@ void AudioCache::encodeWithFfmpeg(const QString &cid,
          << "-i" << srcPath;
 
     bool hasCover = !coverPath.isEmpty() && QFile::exists(coverPath);
-
     if (hasCover) {
         args << "-i" << coverPath;
-        args << "-map" << "0:a";
-        args << "-map" << "1:v";
+        args << "-map" << "0:a" << "-map" << "1:v";
         args << "-c:v" << "mjpeg";
         args << "-disposition:v" << "attached_pic";
     } else {
         args << "-vn";
     }
 
-    args << "-acodec" << "libmp3lame";
-    args << "-q:a" << "2";
-
-    if (!title.isEmpty())
-        args << "-metadata" << ("title=" + title);
-    if (!artist.isEmpty())
-        args << "-metadata" << ("artist=" + artist);
-    if (!album.isEmpty())
-        args << "-metadata" << ("album=" + album);
-
-    args << "-id3v2_version" << "3";
-    args << "-f" << "mp3";
-    args << tmpDst;
+    args << "-acodec" << "libmp3lame" << "-q:a" << "2";
+    if (!title.isEmpty()) args << "-metadata" << ("title=" + title);
+    if (!artist.isEmpty()) args << "-metadata" << ("artist=" + artist);
+    if (!album.isEmpty()) args << "-metadata" << ("album=" + album);
+    args << "-id3v2_version" << "3" << "-f" << "mp3" << tmpDst;
 
     auto *proc = new QProcess(this);
     proc->setProgram(m_ffmpegPath);
     proc->setArguments(args);
     proc->setProcessChannelMode(QProcess::MergedChannels);
 
-    connect(proc, &QProcess::readyReadStandardOutput, this, [proc, cid]() {
-        QByteArray out = proc->readAllStandardOutput();
-        if (!out.isEmpty()) {
-            qDebug() << "[ffmpeg-meta]" << cid << out.trimmed();
-        }
-    });
-
     connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this, proc, cid, srcPath, dstPath, tmpDst, coverPath]
             (int exitCode, QProcess::ExitStatus) {
         proc->deleteLater();
-
-        if (coverPath.startsWith(QDir::tempPath())) {
-            QFile::remove(coverPath);
-        }
+        if (coverPath.startsWith(QDir::tempPath())) QFile::remove(coverPath);
 
         if (exitCode != 0 || QFileInfo(tmpDst).size() < 10240) {
-            qWarning() << "[AudioCache] encode failed:" << cid;
             QFile::remove(tmpDst);
-            if (QFile::copy(srcPath, dstPath)) {
+            if (QFile::copy(srcPath, dstPath))
                 emit libraryDownloadFinished(cid, dstPath);
-            } else {
+            else
                 emit libraryDownloadFailed(cid, "编码失败");
-            }
             return;
         }
-
         QFile::remove(dstPath);
         if (!QFile::rename(tmpDst, dstPath)) {
             QFile::remove(tmpDst);
             emit libraryDownloadFailed(cid, "重命名失败");
             return;
         }
-
-        qDebug() << "[AudioCache] library saved (with metadata):" << dstPath;
         emit libraryDownloadFinished(cid, dstPath);
     });
 
@@ -589,14 +484,11 @@ void AudioCache::encodeWithFfmpeg(const QString &cid,
             [this, cid, srcPath, dstPath, coverPath]
             (QProcess::ProcessError err) {
         if (err == QProcess::FailedToStart) {
-            if (coverPath.startsWith(QDir::tempPath())) {
-                QFile::remove(coverPath);
-            }
-            if (QFile::copy(srcPath, dstPath)) {
+            if (coverPath.startsWith(QDir::tempPath())) QFile::remove(coverPath);
+            if (QFile::copy(srcPath, dstPath))
                 emit libraryDownloadFinished(cid, dstPath);
-            } else {
+            else
                 emit libraryDownloadFailed(cid, "ffmpeg 启动失败");
-            }
         }
     });
 
@@ -626,18 +518,13 @@ bool AudioCache::downloadToLibrary(const QString &cid,
     }
 
     m_libraryTargets.insert(cid, {songName, artist, album, coverUrl});
-
-    if (!m_downloading.contains(cid)) {
-        download(cid, url);
-    }
-
+    if (!m_downloading.contains(cid)) download(cid, url);
     return true;
 }
 
 void AudioCache::onCacheDownloadFinished(const QString &cid,
                                           const QString &localPath) {
     if (!m_libraryTargets.contains(cid)) return;
-
     LibraryTarget t = m_libraryTargets.take(cid);
     writeMetadataAndSave(cid, localPath, t.songName, t.artist,
                          t.album, t.coverUrl);

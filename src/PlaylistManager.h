@@ -22,8 +22,11 @@ public:
     Q_INVOKABLE void removeSong(const QString &playlistId, const QString &cid);
 
     Q_INVOKABLE QVariantList getPlaylistSongs(const QString &playlistId) const;
-    Q_INVOKABLE bool hasSong(const QString &playlistId, const QString &cid) const;
     Q_INVOKABLE int playlistCount(const QString &playlistId) const;
+
+    // ★ 分享
+    Q_INVOKABLE bool exportPlaylist(const QString &id, const QString &filePath);
+    Q_INVOKABLE int importPlaylist(const QString &filePath);   // 返回导入数量
 
 signals:
     void playlistsChanged();

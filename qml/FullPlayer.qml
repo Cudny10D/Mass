@@ -15,7 +15,37 @@ Item {
     property int currentLyricIndex: -1
     property bool showTranslation: true
 
-    readonly property int lyricRowHeight: 110
+    property bool showLyrics: true
+
+    // ★ Hero 动画期间隐藏真实封面（避免和过渡卡片重叠）
+    property bool coverHidden: false
+
+    // ★ 暴露大封面容器，供 Main.qml 计算 Hero 动画目标位置
+    readonly property alias coverWrapperItem: coverWrapper
+
+    readonly property int lyricRowHeight: Theme.fs(88)
+
+    // 鼓点脉冲 0..1：由 audioEngine.beat 驱动，背景据此缩放/提亮
+    property real beatPulse: 0
+
+    Connections {
+        target: audioEngine
+        function onBeat(strength) {
+            // 幅度压低、回落放慢：每次鼓点是一个完整的小呼吸，
+            // 而不是频繁的闪烁
+            root.beatPulse = Math.min(0.85, 0.32 + strength * 0.45)
+            beatDecay.restart()
+        }
+    }
+
+    NumberAnimation {
+        id: beatDecay
+        target: root
+        property: "beatPulse"
+        to: 0
+        duration: 340
+        easing.type: Easing.OutCubic
+    }
 
     TextEdit {
         id: clipboardHelper
@@ -37,7 +67,7 @@ Item {
         anchors.bottomMargin: 80
         width: toastText.implicitWidth + 48
         height: 44
-        radius: 22
+        radius: 0
         color: Theme.darkMode ? "#ee000000" : "#eeffffff"
         border.color: Theme.accent
         border.width: 1
@@ -102,13 +132,13 @@ Item {
         }
 
         lines.push("")
-        lines.push("—— 来自 Monster Siren Records")
+        lines.push("—— 来自 Mass")
         return lines.join("\n")
     }
 
     Popup {
         id: lyricMenu
-        width: 220
+        width: 200
         padding: 0
         modal: false
         focus: true
@@ -134,7 +164,7 @@ Item {
 
         background: Rectangle {
             color: Theme.panel
-            radius: 10
+            radius: 0
             border.color: Theme.border
             border.width: 1
 
@@ -160,7 +190,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 4
-                    radius: 6
+                    radius: 0
                     color: seekArea.containsMouse ? Theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
@@ -170,22 +200,19 @@ Item {
                     spacing: 10
 
                     Text {
-                        text: "▶"
-                        color: Theme.accent
-                        font.pixelSize: Theme.fs(12)
-                    }
-
-                    Text {
                         text: "跳转到这里"
-                        color: Theme.text
+                        color: seekArea.containsMouse ? Theme.text : Theme.textDim
                         font { family: Theme.fontFamily; pixelSize: Theme.fs(13) }
                         Layout.fillWidth: true
+                        Behavior on color { ColorAnimation { duration: 120 } }
                     }
 
                     Text {
-                        text: formatTime(lyricMenu.menuLineTime)
+                        text: Theme.formatTime(lyricMenu.menuLineTime)
                         color: Theme.textMuted
+                        opacity: seekArea.containsMouse ? 1.0 : 0.65
                         font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
                     }
                 }
 
@@ -195,7 +222,7 @@ Item {
                     hoverEnabled: true
                     onClicked: {
                         audioEngine.seek(lyricMenu.menuLineTime)
-                        showToast("已跳转到 " + formatTime(lyricMenu.menuLineTime))
+                        showToast("已跳转到 " + Theme.formatTime(lyricMenu.menuLineTime))
                         lyricMenu.close()
                     }
                 }
@@ -216,7 +243,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 4
-                    radius: 6
+                    radius: 0
                     color: copyLineArea.containsMouse ? Theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
@@ -226,15 +253,11 @@ Item {
                     spacing: 10
 
                     Text {
-                        text: "📋"
-                        font.pixelSize: Theme.fs(12)
-                    }
-
-                    Text {
                         text: "复制这句歌词"
-                        color: Theme.text
+                        color: copyLineArea.containsMouse ? Theme.text : Theme.textDim
                         font { family: Theme.fontFamily; pixelSize: Theme.fs(13) }
                         Layout.fillWidth: true
+                        Behavior on color { ColorAnimation { duration: 120 } }
                     }
                 }
 
@@ -257,7 +280,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 4
-                    radius: 6
+                    radius: 0
                     color: shareLineArea.containsMouse ? Theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
@@ -267,15 +290,11 @@ Item {
                     spacing: 10
 
                     Text {
-                        text: "📤"
-                        font.pixelSize: Theme.fs(12)
-                    }
-
-                    Text {
                         text: "分享这句歌词"
-                        color: Theme.text
+                        color: shareLineArea.containsMouse ? Theme.text : Theme.textDim
                         font { family: Theme.fontFamily; pixelSize: Theme.fs(13) }
                         Layout.fillWidth: true
+                        Behavior on color { ColorAnimation { duration: 120 } }
                     }
                 }
 
@@ -307,7 +326,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 4
-                    radius: 6
+                    radius: 0
                     color: copyAllArea.containsMouse ? Theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
@@ -317,15 +336,11 @@ Item {
                     spacing: 10
 
                     Text {
-                        text: "📄"
-                        font.pixelSize: Theme.fs(12)
-                    }
-
-                    Text {
                         text: "复制全部歌词"
-                        color: Theme.text
+                        color: copyAllArea.containsMouse ? Theme.text : Theme.textDim
                         font { family: Theme.fontFamily; pixelSize: Theme.fs(13) }
                         Layout.fillWidth: true
+                        Behavior on color { ColorAnimation { duration: 120 } }
                     }
                 }
 
@@ -349,7 +364,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     anchors.margins: 4
-                    radius: 6
+                    radius: 0
                     color: shareAllArea.containsMouse ? Theme.hover : "transparent"
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
@@ -359,15 +374,15 @@ Item {
                     spacing: 10
 
                     Text {
-                        text: "🎁"
-                        font.pixelSize: Theme.fs(12)
-                    }
-
-                    Text {
                         text: "分享整首歌词"
-                        color: Theme.accent
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(13); bold: true }
+                        color: shareAllArea.containsMouse ? Theme.accent : Theme.textDim
+                        font {
+                            family: Theme.fontFamily
+                            pixelSize: Theme.fs(13)
+                            bold: shareAllArea.containsMouse
+                        }
                         Layout.fillWidth: true
+                        Behavior on color { ColorAnimation { duration: 120 } }
                     }
                 }
 
@@ -386,40 +401,62 @@ Item {
         }
     }
 
-    function formatTime(ms) {
-        if (!ms || ms < 0) return "0:00"
-        let s = Math.floor(ms / 1000)
-        let m = Math.floor(s / 60); s = s % 60
-        return m + ":" + s.toString().padStart(2, "0")
-    }
-
     // ============================================================
-    // 背景
+    // 背景（★ 修复：切换歌曲时不再残留旧封面）
     // ============================================================
     Rectangle {
         anchors.fill: parent
-        radius: Theme.radiusWindow
+        radius: 0
         color: Theme.bg
         clip: true
+
+        // ★ 底衬：当背景图未加载时，显示主题纯色
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: Theme.bg
+            enabled: false
+        }
 
         Image {
             id: bgImage
             anchors.fill: parent
             source: root.coverUrl
             fillMode: Image.PreserveAspectCrop
+            // 动态背景：缓慢缩放，让静态封面有呼吸感
+            scale: 1.04
+            SequentialAnimation on scale {
+                loops: Animation.Infinite
+                running: bgImage.status === Image.Ready
+                NumberAnimation {
+                    to: 1.14; duration: 20000; easing.type: Easing.InOutSine
+                }
+                NumberAnimation {
+                    to: 1.04; duration: 20000; easing.type: Easing.InOutSine
+                }
+            }
             asynchronous: true
-            cache: true
+            cache: false          // ★ 关键：避免显示上一次缓存的封面
             visible: false
         }
 
         MultiEffect {
+            id: bgBlur
             source: bgImage
             anchors.fill: parent
             blurEnabled: true
             blur: 1.0
             blurMax: 80
-            opacity: 0.35
-            visible: root.coverUrl !== ""
+            // 鼓点时整层被「推」一下：轻微放大，并按主题变亮/变暗。
+            // 深色模式下白闪会像漏光，所以那里改成压暗。
+            opacity: root.coverUrl !== "" ? 0.35 + root.beatPulse * 0.22 : 0
+            scale: 1.0 + root.beatPulse * 0.07
+            brightness: Theme.darkMode
+                        ? (0.0 - root.beatPulse * 0.16)
+                        : (0.02 + root.beatPulse * 0.12)
+            transformOrigin: Item.Center
+            // ★ 只在图片真正加载完成后才显示
+            visible: bgImage.status === Image.Ready && root.coverUrl !== ""
             enabled: false
         }
 
@@ -427,39 +464,271 @@ Item {
             anchors.fill: parent
             radius: parent.radius
             color: Theme.bg
-            opacity: 0.6
+            opacity: Theme.darkMode ? 0.72 : 0.82
             enabled: false
         }
 
         Rectangle {
             anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
             height: parent.height * 0.5
-            bottomLeftRadius: parent.radius
-            bottomRightRadius: parent.radius
+            bottomLeftRadius: 0
+            bottomRightRadius: 0
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "transparent" }
                 GradientStop { position: 1.0; color: Theme.shadowDeep }
             }
             enabled: false
         }
+
+        // 鼓点闪光：浅色提亮、深色压暗
+        Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: Theme.darkMode ? "#000000" : "#ffffff"
+            opacity: root.beatPulse * (Theme.darkMode ? 0.14 : 0.07)
+            enabled: false
+        }
     }
 
-    RowLayout {
+    // ============================================================
+    // 主内容
+    // ============================================================
+    Item {
+        id: contentRoot
         anchors.fill: parent
         anchors.margins: 40
-        spacing: 40
+
+        readonly property real coverMinSize: Math.min(contentRoot.height - 96,
+                                                       contentRoot.width * 0.36)
+        readonly property real coverMaxSize: Math.min(contentRoot.height - 60,
+                                                       contentRoot.width * 0.46)
+        readonly property real lyricsLeftMargin: coverMinSize + 56
+        readonly property real headerClosedWidth: Math.min(480, contentRoot.width * 0.55)
+
+        readonly property real coverCenterY: 60 + 20
+                                              + (contentRoot.height - 60 - 20) / 2
+
+        Item {
+            id: headerWrapper
+            height: 60
+            y: 0
+            z: 200
+
+            x: 0
+            width: contentRoot.width
+
+            RowLayout {
+                id: headerRow
+                anchors.fill: parent
+                spacing: 12
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.title || "未播放"
+                        color: Theme.textBright
+                        font {
+                            family: Theme.fontFamily
+                            pixelSize: Theme.fs(28)
+                            bold: true
+                            letterSpacing: 0.5
+                        }
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.artist || "—"
+                        color: Theme.textMuted
+                        font {
+                            family: Theme.fontFamily
+                            pixelSize: Theme.microSize
+                            letterSpacing: 1.4
+                        }
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Item {
+                    Layout.preferredWidth: 64
+                    Layout.preferredHeight: 30
+                
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 7
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "词"
+                            color: root.showLyrics ? Theme.text : Theme.textDim
+                            font {
+                                family: Theme.fontFamily
+                                pixelSize: Theme.fs(12)
+                                weight: Font.DemiBold
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.showLyrics ? "ON" : "OFF"
+                            color: root.showLyrics ? Theme.accentHover : Theme.textMuted
+                            font {
+                                family: Theme.monoFamily
+                                pixelSize: Theme.microSize
+                                letterSpacing: 1
+                            }
+                        }
+                    }
+                
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: 1
+                        color: root.showLyrics ? Theme.accent : Theme.border
+                        opacity: root.showLyrics ? 1 : 0.5
+                    }
+                
+                    MouseArea {
+                        id: lyrBtn
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.showLyrics = !root.showLyrics
+                    }
+                }
+
+                Item {
+                    Layout.preferredWidth: 64
+                    Layout.preferredHeight: 30
+                
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 7
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "译"
+                            color: root.showTranslation ? Theme.text : Theme.textDim
+                            font {
+                                family: Theme.fontFamily
+                                pixelSize: Theme.fs(12)
+                                weight: Font.DemiBold
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.showTranslation ? "ON" : "OFF"
+                            color: root.showTranslation ? Theme.accentHover : Theme.textMuted
+                            font {
+                                family: Theme.monoFamily
+                                pixelSize: Theme.microSize
+                                letterSpacing: 1
+                            }
+                        }
+                    }
+                
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: 1
+                        color: root.showTranslation ? Theme.accent : Theme.border
+                        opacity: root.showTranslation ? 1 : 0.5
+                    }
+                
+                    MouseArea {
+                        id: transBtn
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.showTranslation = !root.showTranslation
+                    }
+                }
+
+                // 关闭：回到上一页
+                Item {
+                    Layout.preferredWidth: 78
+                    Layout.preferredHeight: 30
+                    Layout.leftMargin: 10
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "关闭"
+                            color: closeBtn.containsMouse ? Theme.accentHover : Theme.textDim
+                            font {
+                                family: Theme.fontFamily
+                                pixelSize: Theme.fs(12)
+                                weight: Font.DemiBold
+                            }
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "ESC"
+                            color: Theme.textMuted
+                            font {
+                                family: Theme.monoFamily
+                                pixelSize: Theme.microSize
+                                letterSpacing: 1
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: 1
+                        color: closeBtn.containsMouse ? Theme.accent : Theme.border
+                        opacity: 0.6
+                    }
+
+                    MouseArea {
+                        id: closeBtn
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.exitFullscreen()
+                    }
+                }
+            }
+        }
 
         // ============================================================
-        // 左侧封面（★ 圆角修复）
+        // 封面（★ 加 opacity 绑定，Hero 动画期间隐藏）
         // ============================================================
         Item {
-            id: fullCoverArea
-            Layout.preferredWidth: Math.min(parent.height - 40, 380)
-            Layout.preferredHeight: width
-            Layout.alignment: Qt.AlignVCenter
+            id: coverWrapper
+
+            opacity: root.coverHidden ? 0 : 1
+            Behavior on opacity { NumberAnimation { duration: 150 } }
+
+            property real coverSize: root.showLyrics
+                                     ? contentRoot.coverMinSize
+                                     : contentRoot.coverMaxSize
+
+            width: coverSize
+            height: coverSize
+
+            x: root.showLyrics
+               ? 0
+               : (contentRoot.width - contentRoot.coverMaxSize) / 2
+
+            y: contentRoot.coverCenterY - height / 2
+
+            Behavior on coverSize {
+                NumberAnimation {
+                    duration: 450
+                    easing.type: Easing.OutCubic
+                }
+            }
+            Behavior on x {
+                NumberAnimation {
+                    duration: 450
+                    easing.type: Easing.OutCubic
+                }
+            }
 
             property bool isHover: fullCoverMouse.containsMouse
-            readonly property real coverRadius: 14
+            readonly property real coverRadius: 0
 
             Rectangle {
                 anchors.centerIn: parent
@@ -467,7 +736,7 @@ Item {
                 anchors.verticalCenterOffset: 8
                 width: parent.width * 0.9
                 height: parent.height * 0.9
-                radius: fullCoverArea.coverRadius + 2
+                radius: coverWrapper.coverRadius + 2
                 color: Theme.shadowDeep
                 enabled: false
             }
@@ -475,7 +744,7 @@ Item {
             Rectangle {
                 id: coverBase
                 anchors.fill: parent
-                radius: fullCoverArea.coverRadius
+                radius: coverWrapper.coverRadius
                 color: Theme.panelAlt
             }
 
@@ -486,8 +755,8 @@ Item {
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 cache: true
-                sourceSize.width: 760
-                sourceSize.height: 760
+                sourceSize.width: 900
+                sourceSize.height: 900
                 visible: false
                 layer.enabled: true
                 layer.smooth: true
@@ -498,7 +767,7 @@ Item {
                 NumberAnimation on rotation {
                     running: audioEngine.isPlaying()
                              && root.coverUrl !== ""
-                             && !fullCoverArea.isHover
+                             && !coverWrapper.isHover
                              && coverImage.status === Image.Ready
                     from: 0
                     to: 360
@@ -515,8 +784,10 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    radius: fullCoverArea.coverRadius
+                    radius: coverWrapper.coverRadius
                     color: "white"
+                    antialiasing: true
+                    smooth: true
                 }
             }
 
@@ -538,16 +809,16 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                radius: fullCoverArea.coverRadius
+                radius: coverWrapper.coverRadius
                 color: "#000000"
-                opacity: fullCoverArea.isHover ? 0.55 : 0
+                opacity: coverWrapper.isHover ? 0.55 : 0
                 Behavior on opacity { NumberAnimation { duration: 180 } }
 
                 Column {
                     anchors.centerIn: parent
                     spacing: 12
-                    opacity: fullCoverArea.isHover ? 1 : 0
-                    scale: fullCoverArea.isHover ? 1.0 : 0.85
+                    opacity: coverWrapper.isHover ? 1 : 0
+                    scale: coverWrapper.isHover ? 1.0 : 0.85
                     Behavior on opacity { NumberAnimation { duration: 180 } }
                     Behavior on scale {
                         NumberAnimation {
@@ -560,7 +831,7 @@ Item {
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: 64
                         height: 64
-                        radius: 32
+                        radius: 0
                         color: Theme.accent
 
                         Text {
@@ -594,99 +865,43 @@ Item {
         }
 
         // ============================================================
-        // 右侧信息 + 歌词
+        // 歌词
         // ============================================================
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 20
+        Item {
+            id: lyricsWrapper
+            anchors {
+                top: headerWrapper.bottom
+                topMargin: 20
+                left: parent.left
+                leftMargin: contentRoot.lyricsLeftMargin
+                right: parent.right
+                bottom: parent.bottom
+            }
+            z: 100
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 12
+            opacity: root.showLyrics ? 1 : 0
+            visible: opacity > 0.01
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 6
-
-                    Text {
-                        text: root.title || "未播放"
-                        color: Theme.textBright
-                        font {
-                            family: Theme.fontFamily
-                            pixelSize: Theme.fs(28)
-                            bold: true
-                            letterSpacing: 0.5
-                        }
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: root.artist || "—"
-                        color: Theme.textDim
-                        font {
-                            family: Theme.fontFamily
-                            pixelSize: Theme.fs(16)
-                            letterSpacing: 0.3
-                        }
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                }
-
-                Rectangle {
-                    Layout.preferredWidth: 78
-                    Layout.preferredHeight: 30
-                    radius: 15
-                    color: root.showTranslation
-                           ? Theme.accent
-                           : (transBtn.containsMouse ? Theme.hover : "transparent")
-                    border.color: root.showTranslation ? "transparent" : Theme.border
-                    border.width: root.showTranslation ? 0 : 1
-                    Behavior on color { ColorAnimation { duration: 180 } }
-
-                    RowLayout {
-                        anchors.centerIn: parent
-                        spacing: 4
-
-                        Text {
-                            text: "译"
-                            color: root.showTranslation
-                                   ? (Theme.darkMode ? "#000000" : "#ffffff")
-                                   : Theme.textDim
-                            font {
-                                family: Theme.fontFamily
-                                pixelSize: Theme.fs(13)
-                                bold: true
-                            }
-                        }
-
-                        Text {
-                            text: root.showTranslation ? "开" : "关"
-                            color: root.showTranslation
-                                   ? (Theme.darkMode ? "#000000" : "#ffffff")
-                                   : Theme.textDim
-                            font { family: Theme.fontFamily; pixelSize: Theme.fs(12) }
-                        }
-                    }
-
-                    MouseArea {
-                        id: transBtn
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: root.showTranslation = !root.showTranslation
-                    }
+            Behavior on opacity {
+                NumberAnimation {
+                    duration: 400
+                    easing.type: Easing.OutCubic
                 }
             }
 
-            // ============================================================
-            // 歌词区：滚动时去模糊，2 秒后恢复
-            // ============================================================
+
             Item {
                 id: lyricContainer
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+                // 高度取行高的奇数倍：滚动时裁切边永远落在两行之间，不会切断文字
+                readonly property int visibleRows: {
+                    var n = Math.floor(parent.height / root.lyricRowHeight)
+                    if (n < 1) return 1
+                    if (n % 2 === 0) n -= 1
+                    return Math.max(1, n)
+                }
+                width: parent.width
+                height: visibleRows * root.lyricRowHeight
+                anchors.verticalCenter: parent.verticalCenter
                 clip: true
 
                 readonly property real autoY: {
@@ -732,36 +947,34 @@ Item {
                             property bool isCurrent: distance === 0
                             property bool isHover: rowMouse.containsMouse
 
-                            property real fontSize: {
-                                if (distance === 0) return Theme.fs(30)
-                                if (distance === 1) return Theme.fs(22)
-                                if (distance === 2) return Theme.fs(18)
-                                if (distance === 3) return Theme.fs(16)
-                                return Theme.fs(15)
-                            }
+                            // 不再让非当前歌词缩小：整列统一字号，
+                            // 远近只靠模糊表达（景深），文字本身不再「瘦一圈」
+                            property real fontSize: lyricRow.isCurrent
+                                                  ? Theme.fs(21) : Theme.fs(16)
 
+                            // 深度模糊：非当前行全部加重，越远越糊
                             property real baseBlur: {
                                 if (distance === 0) return 0.0
-                                if (distance === 1) return 0.15
-                                if (distance === 2) return 0.35
-                                if (distance === 3) return 0.55
-                                return 0.7
+                                if (distance === 1) return 0.55
+                                if (distance === 2) return 0.85
+                                if (distance === 3) return 1.15
+                                return 1.5
                             }
 
-                            property real blurAmount: baseBlur * lyricContainer.blurFactor
+                            property real blurAmount: 0
 
+                            // 只做轻微压暗（不再靠透明度把非当前行「淡掉」）
                             property real contentOpacity: {
                                 if (distance === 0) return 1.0
-                                if (distance === 1) return 0.7
-                                if (distance === 2) return 0.5
-                                if (distance === 3) return 0.35
-                                return 0.25
+                                if (distance === 1) return 0.78
+                                if (distance === 2) return 0.6
+                                return 0.45
                             }
 
                             Rectangle {
                                 anchors.fill: parent
                                 anchors.margins: 2
-                                radius: 8
+                                radius: 0
                                 color: lyricRow.isHover
                                        ? (Theme.darkMode ? "#15ffffff" : "#10000000")
                                        : "transparent"
@@ -775,10 +988,10 @@ Item {
                                     leftMargin: 4
                                     verticalCenter: parent.verticalCenter
                                 }
-                                width: 3
-                                height: (lyricRow.isHover || lyricRow.isCurrent) ? 28 : 0
-                                radius: 1.5
-                                color: lyricRow.isCurrent ? Theme.accent : Theme.textDim
+                                width: 2
+                                height: lyricRow.isCurrent ? 22 : 0
+                                radius: 0
+                                color: Theme.accent
                                 opacity: lyricRow.isHover ? 0.7 : 1.0
                                 Behavior on height {
                                     NumberAnimation {
@@ -798,7 +1011,7 @@ Item {
                                 Text {
                                     width: parent.width
                                     text: modelData.text
-                                    color: lyricRow.isCurrent ? Theme.accent : Theme.text
+                                    color: lyricRow.isCurrent ? Theme.text : Theme.textDim
                                     font {
                                         family: Theme.fontFamily
                                         pixelSize: lyricRow.fontSize
@@ -808,11 +1021,19 @@ Item {
                                     wrapMode: Text.WordWrap
                                     opacity: lyricRow.contentOpacity
 
-                                    layer.enabled: lyricRow.blurAmount > 0.01
+                                    // 当前行已无模糊，改为点亮辉光；非当前行仍走模糊
+                                    layer.enabled: false
                                     layer.effect: MultiEffect {
-                                        blurEnabled: true
+                                        blurEnabled: lyricRow.blurAmount > 0.01
                                         blur: lyricRow.blurAmount
                                         blurMax: 32
+                                        // 辉光：与文字同色的居中模糊阴影（不涉及着色器）
+                                        // 仅深色模式点亮，亮色下辉光显得脏
+                                        shadowEnabled: lyricRow.isCurrent && Theme.darkMode
+                                        shadowColor: Theme.accent
+                                        shadowBlur: 1.0
+                                        shadowVerticalOffset: 0
+                                        shadowHorizontalOffset: 0
                                     }
 
                                     Behavior on opacity { NumberAnimation { duration: 300 } }
@@ -831,12 +1052,11 @@ Item {
                                              && modelData.translated !== undefined
                                              && modelData.translated !== ""
                                     text: modelData.translated || ""
-                                    color: lyricRow.isCurrent ? Theme.text : Theme.textMuted
+                                    color: lyricRow.isCurrent ? Theme.textDim : Theme.textMuted
                                     font {
-                                        family: Theme.fontFamily
-                                        pixelSize: lyricRow.isCurrent
-                                                  ? Theme.fs(16)
-                                                  : Theme.fs(13)
+                                        family: Theme.monoFamily
+                                        pixelSize: Theme.fs(10.5)
+                                        letterSpacing: 0.4
                                     }
                                     horizontalAlignment: Text.AlignLeft
                                     wrapMode: Text.WordWrap
@@ -861,7 +1081,7 @@ Item {
                                     verticalCenter: parent.verticalCenter
                                 }
                                 visible: lyricRow.isHover
-                                text: "点击跳转"
+                                text: Theme.formatTime(modelData.time)
                                 color: Theme.textMuted
                                 font {
                                     family: Theme.fontFamily
@@ -884,7 +1104,7 @@ Item {
                                         if (modelData.time !== undefined) {
                                             audioEngine.seek(modelData.time)
                                             showToast("已跳转到 " +
-                                                      formatTime(modelData.time))
+                                                      Theme.formatTime(modelData.time))
                                         }
                                     } else if (mouse.button === Qt.RightButton) {
                                         let scenePos = mapToItem(null,

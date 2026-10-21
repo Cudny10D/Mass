@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QSettings>
 #include <QQuickStyle>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -128,6 +129,9 @@ static QString runHidden(const QString &program,
 
 class CachedNetworkAccessManagerFactory : public QQmlNetworkAccessManagerFactory {
 public:
+    explicit CachedNetworkAccessManagerFactory(NetworkManager *manager)
+        : m_manager(manager) {}
+
     QNetworkAccessManager *create(QObject *parent) override {
         QNetworkAccessManager *nam = new QNetworkAccessManager(parent);
 
@@ -137,17 +141,21 @@ public:
 
         QDir().mkpath(path);
         diskCache->setCacheDirectory(path);
-        diskCache->setMaximumCacheSize(1024 * 1024 * 1024);
+        diskCache->setMaximumCacheSize(QSettings("ArknightsMusicPlayer", "settings").value("cache/imageMb", 256).toInt() * 1024 * 1024);   // 256 MB
 
         nam->setCache(diskCache);
+        if (m_manager) m_manager->setImageCache(diskCache);
         qDebug() << "[QML] image cache dir:" << path;
         return nam;
     }
+
+private:
+    NetworkManager *m_manager = nullptr;
 };
 
 // ============================================================
 // ★ Windows Job Object
-//   把 node.exe / nllb-server.exe 加进 Job，父进程一消失，
+//   把 node.exe 加进 Job，父进程一消失，
 //   系统会自动把这些子进程一起杀掉（即使 Mass 崩溃或强杀）。
 // ============================================================
 #ifdef Q_OS_WIN
@@ -221,8 +229,100 @@ static void closeJobObject() {
 
 #endif // Q_OS_WIN
 
+// ============================================================
+// 窗口亚克力
+// ============================================================
+#ifdef Q_OS_WIN
+
+enum AccentState {
+    AccentDisabled = 0,
+    AccentEnableAcrylicBlurBehind = 4
+};
+
+struct AccentPolicy {
+    AccentState AccentState;
+    DWORD       AccentFlags;
+    DWORD       GradientColor;   // 0xAABBGGRR
+    DWORD       AnimationId;
+};
+
+struct WindowCompositionAttributeData {
+    DWORD  Attrib;               // WCA_ACCENT_POLICY
+    PVOID  pvData;
+    SIZE_T cbData;
+};
+
+#define WCA_ACCENT_POLICY 19
+
+typedef BOOL (WINAPI *SetWindowCompositionAttributeFn)(
+    HWND, WindowCompositionAttributeData *);
+
+// DWM 系统圆角（Win11）
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWCP_ROUND
+#define DWMWCP_ROUND 2
+#endif
+
+typedef HRESULT (WINAPI *DwmSetWindowAttributeFn)(HWND, DWORD, LPCVOID, DWORD);
+
+static void applySystemRoundedCorners(HWND hwnd) {
+    HMODULE dwm = GetModuleHandleW(L"dwmapi.dll");
+    if (!dwm) dwm = LoadLibraryW(L"dwmapi.dll");
+    if (!dwm) return;
+
+    auto setAttr = reinterpret_cast<DwmSetWindowAttributeFn>(
+        GetProcAddress(dwm, "DwmSetWindowAttribute"));
+    if (!setAttr) return;
+
+    int pref = DWMWCP_ROUND;
+    setAttr(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &pref, sizeof(pref));
+}
+
+// enabled=false 用于窗口淡出时立即撤掉模糊
+static void applyAcrylic(QWindow *window, bool dark, bool enabled) {
+    if (!window) return;
+
+    HWND hwnd = reinterpret_cast<HWND>(window->winId());
+    if (!hwnd) return;
+
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    if (!user32) user32 = LoadLibraryW(L"user32.dll");
+    if (!user32) return;
+
+    auto setAttr = reinterpret_cast<SetWindowCompositionAttributeFn>(
+        GetProcAddress(user32, "SetWindowCompositionAttribute"));
+    if (!setAttr) {
+        qWarning() << "[Acrylic] SetWindowCompositionAttribute unavailable";
+        return;
+    }
+
+    AccentPolicy accent = {};
+    accent.AccentState   = enabled ? AccentEnableAcrylicBlurBehind
+                                   : AccentDisabled;
+    accent.AccentFlags   = 0;
+    accent.GradientColor = dark ? 0x99221C1A : 0x99F4ECE8;
+    accent.AnimationId   = 0;
+
+    WindowCompositionAttributeData data = {};
+    data.Attrib = WCA_ACCENT_POLICY;
+    data.pvData = &accent;
+    data.cbData = sizeof(accent);
+
+    if (!setAttr(hwnd, &data)) {
+        qWarning() << "[Acrylic] SetWindowCompositionAttribute failed:"
+                   << GetLastError();
+        return;
+    }
+
+    if (enabled) applySystemRoundedCorners(hwnd);
+    qDebug() << "[Acrylic]" << (enabled ? "on" : "off");
+}
+
+#endif // Q_OS_WIN
+
 static QProcess *g_apiServer = nullptr;
-static QProcess *g_nllbServer = nullptr;
 
 static bool isPortInUse(quint16 port) {
     QTcpSocket sock;
@@ -263,12 +363,10 @@ static int killProcessOnPort(quint16 port) {
 static void forceReleasePort(quint16 port) {
     if (!isPortInUse(port)) return;
     killProcessOnPort(port);
-    for (int i = 0; i < 15; i++) {
-        QThread::msleep(200);
+    for (int i = 0; i < 10; i++) {
+        QThread::msleep(100);
         if (!isPortInUse(port)) return;
     }
-    killProcessOnPort(port);
-    QThread::msleep(500);
 }
 
 // ============================================================
@@ -382,170 +480,14 @@ static void shutdownApiServer() {
     if (!g_apiServer) return;
     qDebug() << "[Shutdown] stopping API server...";
 
+    // 无窗口子进程 terminate() 无效，直接 kill（残留由 Job 兜底）
     if (g_apiServer->state() != QProcess::NotRunning) {
-        g_apiServer->terminate();
-        if (!g_apiServer->waitForFinished(2000)) {
-            g_apiServer->kill();
-            g_apiServer->waitForFinished(1000);
-        }
+        g_apiServer->kill();
+        g_apiServer->waitForFinished(500);
     }
-
-    qint64 pid = g_apiServer->processId();
-    if (pid > 0)
-        runHidden("taskkill", {"/F", "/T", "/PID", QString::number(pid)}, 3000);
 
     delete g_apiServer;
     g_apiServer = nullptr;
-
-    // 兜底：还有残留 node 占用 3000 端口就全杀
-    forceReleasePort(3000);
-
-    // 再兜底：扫一遍所有 node 进程（应对孤儿 node 用了别的 PID）
-    QString out = runHidden("tasklist",
-                            {"/FI", "IMAGENAME eq node.exe", "/FO", "CSV", "/NH"},
-                            3000);
-    if (!out.isEmpty() && out.contains("node.exe")) {
-        QStringList lines = out.split('\n', Qt::SkipEmptyParts);
-        for (const QString &line : lines) {
-            QStringList parts = line.split(',');
-            if (parts.size() < 2) continue;
-            QString pidStr = parts[1].remove('"').trimmed();
-            bool ok = false;
-            qint64 nodePid = pidStr.toLongLong(&ok);
-            if (!ok || nodePid <= 0) continue;
-            // 只杀 server.js 相关的？不可能全杀——用户可能自己跑 node
-            // 所以这里只处理前面没清干净的
-        }
-    }
-}
-
-// ============================================================
-// NLLB 服务
-// ============================================================
-static bool startNLLBServer() {
-    QString appDir = QCoreApplication::applicationDirPath();
-
-    QStringList candidates = {
-        appDir + "/nllb-server/nllb-server.exe",
-        appDir + "/nllb-server.exe"
-    };
-
-    QString program;
-    for (const QString &p : candidates) {
-        if (QFile::exists(p)) { program = p; break; }
-    }
-
-    if (program.isEmpty()) {
-        qDebug() << "[Boot] nllb-server.exe not found, skipping (optional)";
-        return false;
-    }
-
-    {
-        QTcpSocket sock;
-        sock.connectToHost("127.0.0.1", 9912);
-        if (sock.waitForConnected(300)) {
-            sock.disconnectFromHost();
-            qDebug() << "[Boot] NLLB already running on port 9912";
-            return true;
-        }
-    }
-
-    QString workDir = QFileInfo(program).absolutePath();
-
-    g_nllbServer = new QProcess();
-    g_nllbServer->setProgram(program);
-    g_nllbServer->setWorkingDirectory(workDir);
-    g_nllbServer->setProcessChannelMode(QProcess::MergedChannels);
-
-#ifdef Q_OS_WIN
-    g_nllbServer->setCreateProcessArgumentsModifier(
-        [](QProcess::CreateProcessArguments *args) {
-            args->flags |= CREATE_NO_WINDOW;
-            args->startupInfo->dwFlags |= STARTF_USESHOWWINDOW;
-            args->startupInfo->wShowWindow = SW_HIDE;
-        });
-#endif
-
-    QObject::connect(g_nllbServer, &QProcess::readyReadStandardOutput,
-                     []() {
-        QByteArray out = g_nllbServer->readAllStandardOutput();
-        if (!out.isEmpty()) {
-            for (const QString &line : QString::fromUtf8(out).trimmed()
-                                          .split('\n', Qt::SkipEmptyParts))
-                qDebug() << "[nllb]" << line;
-        }
-    });
-
-    QObject::connect(g_nllbServer,
-                     QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                     [](int code, QProcess::ExitStatus status) {
-        qWarning() << "[nllb] exited with code:" << code
-                   << "status:" << status;
-    });
-
-    QObject::connect(g_nllbServer, &QProcess::errorOccurred,
-                     [](QProcess::ProcessError err) {
-        qWarning() << "[nllb] process error:" << err;
-    });
-
-    qDebug() << "[Boot] starting NLLB:" << program;
-    g_nllbServer->start();
-
-    if (!g_nllbServer->waitForStarted(5000)) {
-        qWarning() << "[Boot] NLLB failed to start";
-        delete g_nllbServer;
-        g_nllbServer = nullptr;
-        return false;
-    }
-
-#ifdef Q_OS_WIN
-    // ★ 加入 Job
-    assignProcessToJob(g_nllbServer);
-#endif
-
-    // 模型加载慢，最多等 120 秒
-    for (int i = 0; i < 120; ++i) {
-        QThread::msleep(1000);
-        QTcpSocket sock;
-        sock.connectToHost("127.0.0.1", 9912);
-        if (sock.waitForConnected(500)) {
-            sock.disconnectFromHost();
-            qDebug() << "[Boot] NLLB ready on port 9912";
-            return true;
-        }
-    }
-
-    qWarning() << "[Boot] NLLB started but port 9912 not ready";
-    return false;
-}
-
-static void shutdownNLLBServer() {
-    if (!g_nllbServer) {
-        if (isPortInUse(9912)) {
-            qWarning() << "[Shutdown] orphan NLLB on 9912, cleaning up";
-            forceReleasePort(9912);
-        }
-        return;
-    }
-
-    qDebug() << "[Shutdown] stopping NLLB...";
-
-    if (g_nllbServer->state() != QProcess::NotRunning) {
-        g_nllbServer->terminate();
-        if (!g_nllbServer->waitForFinished(3000)) {
-            g_nllbServer->kill();
-            g_nllbServer->waitForFinished(1000);
-        }
-    }
-
-    qint64 pid = g_nllbServer->processId();
-    if (pid > 0)
-        runHidden("taskkill",
-                  {"/F", "/T", "/PID", QString::number(pid)}, 3000);
-
-    delete g_nllbServer;
-    g_nllbServer = nullptr;
-    forceReleasePort(9912);
 }
 
 // ============================================================
@@ -625,19 +567,17 @@ int main(int argc, char *argv[]) {
     qDebug() << "[Boot] QT_MEDIA_BACKEND =" << qgetenv("QT_MEDIA_BACKEND");
 
     startApiServer();
-    startNLLBServer();
 
     // atexit 兜底（正常退出时触发；崩溃时靠 Job Object）
     std::atexit([]() {
         if (isPortInUse(3000))  killProcessOnPort(3000);
-        if (isPortInUse(9912))  killProcessOnPort(9912);
     });
 
     NetworkManager networkManager;
     AudioEngine audioEngine;
     AudioCache audioCache(networkManager.manager());
     AudioMetadataProbe audioMetadataProbe(networkManager.manager());
-    CoverCache coverCache(networkManager.manager());
+    CoverCache coverCache(&networkManager);
     TranslationService translationService(networkManager.manager());
     Settings settings;
     HistoryManager historyManager;
@@ -652,14 +592,14 @@ int main(int argc, char *argv[]) {
         [&translationService]() {
         translationService.flushCache();
         shutdownApiServer();
-        shutdownNLLBServer();
 #ifdef Q_OS_WIN
         closeJobObject();
 #endif
     });
 
     QQmlApplicationEngine engine;
-    engine.setNetworkAccessManagerFactory(new CachedNetworkAccessManagerFactory);
+    engine.setNetworkAccessManagerFactory(
+        new CachedNetworkAccessManagerFactory(&networkManager));
 
     engine.rootContext()->setContextProperty("networkManager", &networkManager);
     engine.rootContext()->setContextProperty("audioEngine", &audioEngine);
@@ -676,15 +616,58 @@ int main(int argc, char *argv[]) {
 
     if (engine.rootObjects().isEmpty()) {
         shutdownApiServer();
-        shutdownNLLBServer();
 #ifdef Q_OS_WIN
         closeJobObject();
 #endif
         return -1;
     }
 
+    // 提前建好 QML 的 NAM，封面预取才会写进图片缓存
+    networkManager.setQmlManager(engine.networkAccessManager());
+
     QWindow *mainWindow = qobject_cast<QWindow*>(engine.rootObjects().first());
     if (mainWindow) systemTray.setWindow(mainWindow);
+
+#ifdef Q_OS_WIN
+    // 主题切换重新上色；淡出时先关掉模糊
+    {
+        // 只在"窗口在屏 + 内容不透明"时开亚克力：窗口隐藏后若再开启，
+        // DWM 会在桌面上留下一块点不动的毛玻璃残影
+        auto syncAcrylic = [mainWindow, &settings]() {
+            if (!mainWindow) return;
+            const bool onScreen = mainWindow->isVisible()
+                && mainWindow->visibility() != QWindow::Minimized;
+            const bool opaque =
+                mainWindow->property("windowOpacity").toReal() > 0.99;
+            applyAcrylic(mainWindow, settings.darkMode(), onScreen && opaque);
+        };
+
+        bool lastDark = settings.darkMode();
+        syncAcrylic();
+
+        QObject::connect(&settings, &Settings::changed, mainWindow,
+            [mainWindow, &settings, lastDark, syncAcrylic]() mutable {
+                const bool dark = settings.darkMode();
+                if (dark == lastDark) return;
+                lastDark = dark;
+                syncAcrylic();
+            });
+
+        if (mainWindow) {
+            QObject::connect(mainWindow, SIGNAL(windowOpacityChanged()),
+                             &systemTray, SLOT(onWindowOpacityChanged()));
+            QObject::connect(&systemTray, &SystemTrayManager::windowFadeChanged,
+                             mainWindow, syncAcrylic);
+            QObject::connect(mainWindow, &QWindow::visibilityChanged,
+                             mainWindow, syncAcrylic);
+            // 退出前先撤掉模糊
+            QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                             mainWindow, [mainWindow]() {
+                applyAcrylic(mainWindow, true, false);
+            });
+        }
+    }
+#endif
 
     QObject::connect(&app, &QCoreApplication::aboutToQuit, [&engine]() {
         const auto roots = engine.rootObjects();
@@ -720,7 +703,6 @@ int main(int argc, char *argv[]) {
     // 双重保险
     translationService.flushCache();
     shutdownApiServer();
-    shutdownNLLBServer();
 #ifdef Q_OS_WIN
     closeJobObject();
 #endif

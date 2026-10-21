@@ -1,8 +1,10 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Effects
 
+// ============================================================
+// 播放历史：索引条 + 光盘盒网格（与曲目资料库同一套语言）
+// ============================================================
 Item {
     id: root
 
@@ -19,321 +21,248 @@ Item {
         return "file:///" + cover
     }
 
-    Rectangle {
+    ColumnLayout {
         anchors.fill: parent
-        color: "transparent"
+        anchors.leftMargin: Theme.contentSideMargin
+        anchors.rightMargin: Theme.contentSideMargin
+        spacing: 0
 
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 0
+        // 索引条
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 40
 
-            // 顶部栏
-            Item {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 56
+            RowLayout {
+                anchors.fill: parent
+                spacing: 12
 
-                RowLayout {
-                    anchors { fill: parent; leftMargin: 96; rightMargin: 32 }
-                    spacing: 12
-
-                    Text {
-                        text: "播放历史"
-                        color: Theme.text
-                        font {
-                            family: Theme.fontFamily
-                            pixelSize: Theme.fs(18)
-                            bold: true
-                        }
-                        Layout.fillWidth: true
+                Text {
+                    text: "PLAY HISTORY / 播放记录"
+                    color: Theme.textDim
+                    font {
+                        family: Theme.monoFamily
+                        pixelSize: Theme.labelSize
+                        letterSpacing: 1.8
                     }
+                }
 
-                    Text {
-                        text: historyManager.count + " 首"
-                        color: Theme.textDim
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(12) }
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 1
+                    color: Theme.border
+                    opacity: 0.55
+                }
+
+                Text {
+                    text: historyManager.count + " 首"
+                    color: Theme.textMuted
+                    font {
+                        family: Theme.fontFamily
+                        pixelSize: Theme.labelSize
+                        letterSpacing: 1.2
                     }
+                }
 
-                    Rectangle {
-                        Layout.preferredWidth: 80
-                        Layout.preferredHeight: 32
-                        radius: 16
-                        color: clearBtn.containsMouse ? Theme.danger : "transparent"
-                        border.color: clearBtn.containsMouse ? "transparent" : Theme.border
-                        border.width: clearBtn.containsMouse ? 0 : 1
-                        Behavior on color { ColorAnimation { duration: Theme.animFast } }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "清空"
-                            color: clearBtn.containsMouse
-                                   ? "#ffffff"
-                                   : Theme.textDim
-                            font {
-                                family: Theme.fontFamily
-                                pixelSize: Theme.fs(12)
-                                bold: clearBtn.containsMouse
-                            }
-                        }
-
-                        MouseArea {
-                            id: clearBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: historyManager.clear()
-                        }
+                Item {
+                    width: 46; height: 24
+                    Text {
+                        anchors.centerIn: parent
+                        text: "清空"
+                        color: clearArea.containsMouse ? Theme.danger : Theme.textDim
+                        font { family: Theme.fontFamily; pixelSize: Theme.fs(11.5) }
+                    }
+                    MouseArea {
+                        id: clearArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: historyManager.clear()
                     }
                 }
             }
+        }
 
-            // 内容区
-            Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+        // 内容
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.topMargin: 18
+            clip: true
+
+            // 空状态
+            Column {
+                anchors.centerIn: parent
+                spacing: 8
+                visible: historyManager.count === 0
+
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "NO RECORD"
+                    color: Theme.textMuted
+                    font {
+                        family: Theme.monoFamily
+                        pixelSize: Theme.fs(13)
+                        letterSpacing: 3
+                    }
+                }
+                Text {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "播放过的曲目会记录在这里"
+                    color: Theme.textMuted
+                    font { family: Theme.fontFamily; pixelSize: Theme.fs(11.5) }
+                }
+            }
+
+            GridView {
+                id: historyGrid
+                anchors.fill: parent
                 clip: true
+                visible: historyManager.count > 0
 
-                // 空状态
-                Column {
-                    anchors.centerIn: parent
-                    spacing: 16
-                    visible: historyManager.count === 0
+                readonly property var metrics: Theme.gridMetrics
+                property int columns: metrics.columns
+                property int gap: Theme.gridGap
 
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: "⟲"
-                        color: Theme.textMuted
-                        font.pixelSize: 56
-                        opacity: 0.4
-                    }
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: "还没有播放记录"
-                        color: Theme.textDim
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(14) }
-                    }
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: "播放任意歌曲后，会自动记录在这里"
-                        color: Theme.textMuted
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
-                    }
-                }
+                cellWidth: metrics.cellWidth
+                cellHeight: Math.max(1, metrics.cellWidth + 58)
 
-                // 历史网格
-                GridView {
-                    id: historyGrid
-                    anchors.fill: parent
-                    anchors.leftMargin: 96
-                    anchors.rightMargin: 32
-                    anchors.topMargin: 8
-                    anchors.bottomMargin: 0
-                    clip: true
-                    visible: historyManager.count > 0
+                model: historyManager.history
 
-                    property int columns: 5
-                    property int gap: 24
+                delegate: Item {
+                    width: historyGrid.cellWidth
+                    height: historyGrid.cellHeight
+                    property bool isHover: hArea.containsMouse
 
-                    // cell 平分可视宽度，最后一列贴合右边界，保证可点击
-                    cellWidth: width / columns
-                    cellHeight: cellWidth + 64
-
-                    model: historyManager.history
-
-                    delegate: Item {
-                        width: historyGrid.cellWidth
-                        height: historyGrid.cellHeight
-                        property bool isHover: hArea.containsMouse
-
-                        Column {
-                            anchors {
-                                left: parent.left
-                                right: parent.right
-                                top: parent.top
-                                leftMargin: historyGrid.gap / 2
-                                rightMargin: historyGrid.gap / 2
-                            }
-                            spacing: 6
-
-                            Item {
-                                id: coverItem
-                                width: parent.width
-                                height: parent.width
-
-                                property real cornerRadius: 10
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: coverItem.cornerRadius
-                                    color: Theme.panelAlt
-                                }
-
-                                Image {
-                                    id: coverImg
-                                    anchors.fill: parent
-                                    source: root.coverSource(modelData.cover)
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                    cache: true
-                                    sourceSize.width: 400
-                                    sourceSize.height: 400
-                                    visible: false
-                                    layer.enabled: true
-                                }
-
-                                Item {
-                                    id: coverMaskSource
-                                    anchors.fill: parent
-                                    visible: false
-                                    layer.enabled: true
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: coverItem.cornerRadius
-                                        color: "white"
-                                    }
-                                }
-
-                                MultiEffect {
-                                    anchors.fill: parent
-                                    source: coverImg
-                                    visible: coverImg.status === Image.Ready
-                                    maskEnabled: true
-                                    maskSource: coverMaskSource
-                                }
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "♪"
-                                    color: Theme.textMuted
-                                    font.pixelSize: 28
-                                    visible: coverImg.status !== Image.Ready
-                                }
-
-                                transform: Scale {
-                                    origin.x: coverItem.width / 2
-                                    origin.y: coverItem.height / 2
-                                    xScale: isHover ? 1.03 : 1.0
-                                    yScale: isHover ? 1.03 : 1.0
-                                    Behavior on xScale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-                                    Behavior on yScale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-                                }
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: coverItem.cornerRadius
-                                    color: "#000000"
-                                    opacity: isHover ? 0.35 : 0
-                                    Behavior on opacity { NumberAnimation { duration: 150 } }
-
-                                    Rectangle {
-                                        anchors.centerIn: parent
-                                        width: 36; height: 36; radius: 18
-                                        color: Theme.accent
-                                        scale: isHover ? 1.0 : 0.7
-                                        opacity: isHover ? 1 : 0
-                                        Behavior on scale { NumberAnimation { duration: 220 } }
-                                        Behavior on opacity { NumberAnimation { duration: 220 } }
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "▶"
-                                            color: Theme.darkMode ? "#000000" : "#ffffff"
-                                            font.pixelSize: 14
-                                            font.bold: true
-                                        }
-                                    }
-                                }
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: modelData.name || ""
-                                color: isHover ? Theme.accent : Theme.text
-                                font {
-                                    family: Theme.fontFamily
-                                    pixelSize: Theme.fs(12)
-                                    weight: Font.Medium
-                                }
-                                elide: Text.ElideRight
-                                Behavior on color { ColorAnimation { duration: 120 } }
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: modelData.artist || ""
-                                color: Theme.textDim
-                                font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
-                                elide: Text.ElideRight
-                            }
+                    Item {
+                        id: coverBox
+                        anchors {
+                            left: parent.left
+                            right: parent.right
+                            top: parent.top
+                            leftMargin: historyGrid.gap / 2
+                            rightMargin: historyGrid.gap / 2
                         }
+                        height: width
 
-                        MouseArea {
-                            id: hArea
+                        Rectangle {
                             anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                var list = []
-                                for (var i = 0; i < historyManager.count; i++) {
-                                    var item = historyManager.history[i]
-                                    list.push({
-                                        cid: item.cid,
-                                        name: item.name,
-                                        artist: item.artist,
-                                        cover: item.cover
-                                    })
+                            color: Theme.panelAlt
+                        }
+
+                        Image {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            source: root.coverSource(modelData.cover)
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            cache: true
+                            sourceSize.width: 400
+                            sourceSize.height: 400
+                            smooth: true
+                            mipmap: true
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            border.width: 1
+                            border.color: Theme.darkMode ? "#26FFFFFF" : "#33000000"
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "#000000"
+                            opacity: isHover ? 0.42 : 0
+                            Behavior on opacity { NumberAnimation { duration: 140 } }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "播放 ↗"
+                                color: "#F2F0E9"
+                                opacity: isHover ? 1 : 0
+                                font {
+                                    family: Theme.monoFamily
+                                    pixelSize: Theme.fs(10)
+                                    letterSpacing: 2
                                 }
-                                root.playListRequested(list, index)
+                                Behavior on opacity { NumberAnimation { duration: 140 } }
                             }
                         }
                     }
 
-                    ScrollBar.vertical: ScrollBar {
-                        active: true
-                        policy: ScrollBar.AsNeeded
-                        width: 6
-                        contentItem: Rectangle {
-                            radius: 3
-                            color: Theme.textMuted
-                            opacity: 0.4
+                    Text {
+                        id: numLabel
+                        anchors { left: coverBox.left; top: coverBox.bottom; topMargin: 8 }
+                        text: (index + 1).toString().padStart(2, "0")
+                        color: Theme.textMuted
+                        font {
+                            family: Theme.monoFamily
+                            pixelSize: Theme.microSize
+                            letterSpacing: 1
+                        }
+                    }
+
+                    Text {
+                        anchors {
+                            left: numLabel.right
+                            leftMargin: 10
+                            right: coverBox.right
+                            top: coverBox.bottom
+                            topMargin: 6
+                        }
+                        text: modelData.name || ""
+                        color: Theme.text
+                        font {
+                            family: Theme.fontFamily
+                            pixelSize: Theme.fs(12.5)
+                            weight: Font.DemiBold
+                        }
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        anchors {
+                            left: numLabel.right
+                            leftMargin: 10
+                            right: coverBox.right
+                            top: coverBox.bottom
+                            topMargin: 24
+                        }
+                        text: modelData.artist || ""
+                        color: Theme.textMuted
+                        font {
+                            family: Theme.fontFamily
+                            pixelSize: Theme.microSize
+                        }
+                        elide: Text.ElideRight
+                    }
+
+                    MouseArea {
+                        id: hArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            var list = []
+                            for (var i = 0; i < historyManager.count; i++) {
+                                var item = historyManager.history[i]
+                                list.push({
+                                    cid: item.cid,
+                                    name: item.name,
+                                    artist: item.artist,
+                                    cover: item.cover
+                                })
+                            }
+                            root.playListRequested(list, index)
                         }
                     }
                 }
 
-                // 顶部遮罩
-                Rectangle {
-                    anchors {
-                        top: parent.top
-                        left: parent.left
-                        right: parent.right
-                    }
-                    height: 80
-                    topLeftRadius: Theme.windowFullscreen ? Theme.radiusWindow : 0
-                    topRightRadius: Theme.windowFullscreen ? Theme.radiusWindow : 0
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.windowTop(1.0) }
-                        GradientStop { position: 0.5; color: Theme.windowTop(0.65) }
-                        GradientStop { position: 1.0; color: Theme.windowTop(0.0) }
-                    }
-                    z: 100
-                    enabled: false
-                }
-
-                // 底部遮罩
-                Rectangle {
-                    anchors {
-                        bottom: parent.bottom
-                        left: parent.left
-                        right: parent.right
-                    }
-                    height: 100
-                    bottomLeftRadius: Theme.radiusWindow
-                    bottomRightRadius: Theme.radiusWindow
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.windowBottom(0.0) }
-                        GradientStop { position: 0.5; color: Theme.windowBottom(0.65) }
-                        GradientStop { position: 1.0; color: Theme.windowBottom(1.0) }
-                    }
-                    z: 100
-                    enabled: false
+                ScrollBar.vertical: ScrollBar {
+                    active: true
+                    policy: ScrollBar.AsNeeded
+                    width: 4
+                    contentItem: Rectangle { color: Theme.textMuted; opacity: 0.35 }
                 }
             }
         }

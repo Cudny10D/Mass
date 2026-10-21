@@ -28,6 +28,13 @@ Item {
         opacity = 0
     }
 
+    // ★ Esc 关闭
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.visible
+        onActivated: root.close()
+    }
+
     Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
     // 遮罩
@@ -46,7 +53,7 @@ Item {
         anchors.centerIn: parent
         width: 400
         height: 480
-        radius: Theme.radiusLarge
+        radius: 0
         color: Theme.panel
         border.color: Theme.border
         border.width: 1
@@ -78,7 +85,7 @@ Item {
                 Rectangle {
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 28
-                    radius: 14
+                    radius: 0
                     color: topCloseBtn.containsMouse ? Theme.hover : "transparent"
 
                     Text {
@@ -105,7 +112,7 @@ Item {
                 Rectangle {
                     Layout.preferredWidth: 40
                     Layout.preferredHeight: 40
-                    radius: 8
+                    radius: 0
                     color: Theme.panelAlt
                     clip: true
 
@@ -160,7 +167,7 @@ Item {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 44
-                radius: Theme.radius
+                radius: 0
                 color: newBtn.containsMouse ? Theme.accentHover : Theme.accent
                 Behavior on color { ColorAnimation { duration: Theme.animFast } }
 
@@ -169,12 +176,12 @@ Item {
                     spacing: 8
                     Text {
                         text: "+"
-                        color: Theme.darkMode ? "#000000" : "#ffffff"
+                        color: Theme.ink
                         font.pixelSize: Theme.fs(18); font.bold: true
                     }
                     Text {
                         text: "新建歌单并添加"
-                        color: Theme.darkMode ? "#000000" : "#ffffff"
+                        color: Theme.ink
                         font { family: Theme.fontFamily; pixelSize: Theme.fs(12); bold: true }
                     }
                 }
@@ -230,7 +237,7 @@ Item {
                     delegate: Rectangle {
                         width: plList.width
                         height: 52
-                        radius: Theme.radius
+                        radius: 0
                         color: plArea.containsMouse ? Theme.hover : "transparent"
                         Behavior on color { ColorAnimation { duration: 120 } }
 
@@ -264,12 +271,10 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             onClicked: {
-                                console.log("[Picker] adding to playlist:", modelData.name)
-                                let ok = playlistManager.addSong(
+                                playlistManager.addSong(
                                     modelData.id, root.songCid,
                                     root.songName, root.songArtist,
                                     root.songCover)
-                                console.log("[Picker] addSong result:", ok)
                                 root.close()
                             }
                         }

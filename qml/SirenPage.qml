@@ -2,8 +2,16 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml.Models
-import QtQuick.Effects
 
+// ============================================================
+// 发现音乐 / 曲目资料库
+//
+// 列表态：细线索引条 + 光盘盒网格
+// 详情态：左侧资料栏（封面 + 编号 + 简介）｜ 右侧曲目表
+//
+// 视觉规则：不用卡片、不用阴影、不用玻璃；分隔靠 1px 线，
+// 可点击的东西才是橄榄色，其余一律墨黑或灰。
+// ============================================================
 Item {
     id: root
 
@@ -17,14 +25,13 @@ Item {
 
     property bool showingAlbums: mode === "albums"
     property bool showingDetail: mode === "detail"
+    property bool loadingDetail: false
 
     ListModel { id: albumModel }
     ListModel { id: songModel }
 
     Component.onCompleted: {
-        if (albumModel.count === 0) {
-            networkManager.getAllAlbums()
-        }
+        if (albumModel.count === 0) networkManager.getAllAlbums()
     }
 
     function parseArtists(s, fallback) {
@@ -70,696 +77,758 @@ Item {
         }
     }
 
-    Rectangle {
+    // [dev] 打开第一张专辑，便于截图核对（正式版可删）
+    function devOpenFirstAlbum() {
+        if (albumModel.count === 0) return
+        var a = albumModel.get(0)
+        root.currentAlbumName = a.name
+        root.currentAlbumCid = a.cid
+        root.currentAlbumCover = a.coverUrl
+        root.currentAlbumArtist = a.artist
+        songModel.clear()
+        root.loadingDetail = true
+        root.mode = "detail"
+        networkManager.getAlbumDetail(a.cid)
+    }
+
+    function backToAlbums() {        root.mode = "albums"
+        root.currentAlbumName = ""
+        root.currentAlbumCid = ""
+        root.currentAlbumCover = ""
+        root.currentAlbumArtist = ""
+    }
+
+    // 小号等宽标签（全大写英文 + 中文）
+    component MicroLabel: Text {
+        color: Theme.textMuted
+        font {
+            family: Theme.monoFamily
+            pixelSize: Theme.microSize
+            letterSpacing: 1.4
+        }
+    }
+
+    // 1px 细线
+    component Hairline: Rectangle {
+        height: 1
+        color: Theme.border
+        opacity: 0.55
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // 列表态
+    // ══════════════════════════════════════════════════════════
+    Item {
         anchors.fill: parent
-        color: "transparent"
+        opacity: root.showingAlbums ? 1 : 0
+        visible: opacity > 0.01
+        Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
         ColumnLayout {
             anchors.fill: parent
+            anchors.leftMargin: Theme.contentSideMargin
+            anchors.rightMargin: Theme.contentSideMargin
             spacing: 0
 
+            // 索引条
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 56
-                clip: true
+                Layout.preferredHeight: 40
 
                 RowLayout {
-                    anchors { fill: parent; leftMargin: 96; rightMargin: 32 }
+                    anchors.fill: parent
                     spacing: 12
-                    opacity: root.showingAlbums ? 1 : 0
-                    x: root.showingAlbums ? 0 : -40
-                    visible: opacity > 0.01
-                    Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-                    Behavior on x { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
 
                     Text {
-                        text: "Monster Siren Records"
-                        color: Theme.text
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(18); bold: true }
-                        Layout.fillWidth: true
-                        elide: Text.ElideRight
+                        text: "ALBUM INDEX / 唱片索引"
+                        color: Theme.textDim
+                        font {
+                            family: Theme.monoFamily
+                            pixelSize: Theme.labelSize
+                            letterSpacing: 1.8
+                        }
+                        Layout.alignment: Qt.AlignVCenter
                     }
 
-                    Rectangle {
-                        Layout.preferredWidth: 80
-                        Layout.preferredHeight: 32
-                        radius: 16
-                        color: refreshBtn.containsMouse ? Theme.accentHover : Theme.accent
-                        Behavior on color { ColorAnimation { duration: Theme.animFast } }
+                    Hairline {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+                    }
 
-                        Rectangle {
-                            anchors { top: parent.top; left: parent.left; right: parent.right }
-                            anchors.margins: 1
-                            height: parent.height / 2
-                            radius: parent.radius
-                            gradient: Gradient {
-                                GradientStop { position: 0.0; color: "#30ffffff" }
-                                GradientStop { position: 1.0; color: "#00ffffff" }
-                            }
-                            opacity: Theme.darkMode ? 0.5 : 0.15
-                            enabled: false
+                    Text {
+                        text: albumModel.count + " 张"
+                        color: Theme.textMuted
+                        font {
+                            family: Theme.fontFamily
+                            pixelSize: Theme.labelSize
+                            letterSpacing: 1.2
                         }
+                    }
 
+                    // 刷新
+                    Item {
+                        width: 46; height: 24
                         Text {
-                            anchors.centerIn: parent; text: "刷新"
-                            color: Theme.darkMode ? "#000000" : "#ffffff"
-                            font { family: Theme.fontFamily; pixelSize: Theme.fs(12); bold: true }
+                            anchors.centerIn: parent
+                            text: "刷新"
+                            color: refreshArea.containsMouse ? Theme.accentHover : Theme.textDim
+                            font {
+                                family: Theme.fontFamily
+                                pixelSize: Theme.fs(11.5)
+                            }
                         }
-
                         MouseArea {
-                            id: refreshBtn; anchors.fill: parent; hoverEnabled: true
+                            id: refreshArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 albumModel.clear()
                                 networkManager.getAllAlbums()
                             }
                         }
                     }
-
-                    Text {
-                        text: albumModel.count + " 张专辑"
-                        color: Theme.textDim
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(12) }
-                    }
-                }
-
-                Rectangle {
-                    id: backPill
-                    anchors.centerIn: parent
-                    height: 32
-                    width: Math.max(100,
-                                    Math.min(parent.width - 80,
-                                             backRow.implicitWidth + 32))
-                    radius: 16
-                    opacity: root.showingDetail ? 1 : 0
-                    x: root.showingDetail ? 0 : 40
-                    visible: opacity > 0.01
-                    Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-                    Behavior on x { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-
-                    color: backArea.containsMouse
-                           ? Theme.accent
-                           : (Theme.darkMode ? "#1effffff" : "#0a000000")
-                    Behavior on color { ColorAnimation { duration: Theme.animFast } }
-
-                    Rectangle {
-                        anchors { top: parent.top; left: parent.left; right: parent.right }
-                        anchors.margins: 1
-                        height: parent.height / 2
-                        radius: parent.radius
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#30ffffff" }
-                            GradientStop { position: 1.0; color: "#00ffffff" }
-                        }
-                        opacity: backArea.containsMouse
-                                 ? (Theme.darkMode ? 0.5 : 0.15)
-                                 : (Theme.darkMode ? 0.4 : 0.1)
-                        enabled: false
-                    }
-
-                    RowLayout {
-                        id: backRow
-                        anchors.centerIn: parent
-                        spacing: 6
-
-                        Text {
-                            text: "←"
-                            color: backArea.containsMouse
-                                   ? (Theme.darkMode ? "#000000" : "#ffffff")
-                                   : Theme.text
-                            font { family: Theme.fontFamily; pixelSize: Theme.fs(14); bold: true }
-                            Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                        }
-
-                        Text {
-                            Layout.maximumWidth: 240
-                            text: root.currentAlbumName || "返回"
-                            color: backArea.containsMouse
-                                   ? (Theme.darkMode ? "#000000" : "#ffffff")
-                                   : Theme.text
-                            font {
-                                family: Theme.fontFamily
-                                pixelSize: Theme.fs(12)
-                                bold: backArea.containsMouse
-                            }
-                            elide: Text.ElideRight
-                            Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                        }
-                    }
-
-                    MouseArea {
-                        id: backArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: {
-                            root.mode = "albums"
-                            root.currentAlbumName = ""
-                            root.currentAlbumCid = ""
-                            root.currentAlbumCover = ""
-                            root.currentAlbumArtist = ""
-                        }
-                    }
                 }
             }
 
+            // 网格
             Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.topMargin: 18
                 clip: true
 
-                // ============================================================
-                // 专辑网格
-                // ============================================================
-                Item {
+                Text {
+                    anchors.centerIn: parent
+                    visible: albumModel.count === 0
+                    text: "正在读取唱片数据…"
+                    color: Theme.textMuted
+                    font {
+                        family: Theme.monoFamily
+                        pixelSize: Theme.labelSize
+                        letterSpacing: 1.6
+                    }
+                }
+
+                GridView {
+                    id: albumsGrid
                     anchors.fill: parent
-                    opacity: root.showingAlbums ? 1 : 0
-                    x: root.showingAlbums ? 0 : -60
-                    visible: opacity > 0.01
+                    clip: true
+                    bottomMargin: 28
 
-                    Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
-                    Behavior on x { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+                    readonly property var metrics: Theme.gridMetrics
+                    property int columns: metrics.columns
+                    property int gap: Theme.gridGap
 
-                    Column {
-                        anchors.centerIn: parent
-                        spacing: 12
-                        visible: albumModel.count === 0
+                    cellWidth: metrics.cellWidth
+                    cellHeight: Math.max(1, metrics.cellWidth + 62)
 
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: "◈"; color: Theme.accent
-                            font.pixelSize: 48; opacity: 0.6
+                    model: albumModel
+
+                    delegate: Item {
+                        width: albumsGrid.cellWidth
+                        height: albumsGrid.cellHeight
+
+                        property bool isHover: aArea.containsMouse
+
+                        Item {
+                            id: coverBox
+                            anchors {
+                                left: parent.left
+                                right: parent.right
+                                top: parent.top
+                                leftMargin: albumsGrid.gap / 2
+                                rightMargin: albumsGrid.gap / 2
+                            }
+                            height: width
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: Theme.panelAlt
+                            }
+
+                            Image {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                source: model.coverUrl || ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                cache: true
+                                sourceSize.width: 512
+                                sourceSize.height: 512
+                                smooth: true
+                                mipmap: true
+                            }
+
+                            // 细描边：光盘盒的塑料边
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                border.width: 1
+                                border.color: Theme.darkMode ? "#26FFFFFF" : "#33000000"
+                            }
+
+                            // 悬停：压暗 + 打开提示
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "#000000"
+                                opacity: isHover ? 0.42 : 0
+                                Behavior on opacity { NumberAnimation { duration: 140 } }
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "打开 ↗"
+                                    color: "#F2F0E9"
+                                    opacity: isHover ? 1 : 0
+                                    font {
+                                        family: Theme.fontFamily
+                                        pixelSize: Theme.fs(10)
+                                        letterSpacing: 2
+                                    }
+                                    Behavior on opacity { NumberAnimation { duration: 140 } }
+                                }
+                            }
                         }
+
+                        // 序号：像资料库里的条目号
                         Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: "正在加载塞壬唱片..."
-                            color: Theme.textDim
-                            font { family: Theme.fontFamily; pixelSize: Theme.fs(13) }
+                            id: numLabel
+                            anchors {
+                                left: coverBox.left
+                                top: coverBox.bottom
+                                topMargin: 8
+                            }
+                            text: (index + 1).toString().padStart(2, "0")
+                            color: Theme.textMuted
+                            font {
+                                family: Theme.monoFamily
+                                pixelSize: Theme.microSize
+                                letterSpacing: 1
+                            }
+                        }
+
+                        Text {
+                            anchors {
+                                left: numLabel.right
+                                leftMargin: 10
+                                right: coverBox.right
+                                top: coverBox.bottom
+                                topMargin: 6
+                            }
+                            text: model.name || ""
+                            color: isHover ? Theme.textBright : Theme.text
+                            font {
+                                family: Theme.fontFamily
+                                pixelSize: Theme.fs(12.5)
+                                weight: Font.DemiBold
+                            }
+                            elide: Text.ElideRight
+                            maximumLineCount: 1
+                            Behavior on color { ColorAnimation { duration: 110 } }
+                        }
+
+                        Text {
+                            anchors {
+                                left: numLabel.right
+                                leftMargin: 10
+                                right: coverBox.right
+                                top: coverBox.bottom
+                                topMargin: 24
+                            }
+                            text: model.artist || ""
+                            color: Theme.textMuted
+                            font {
+                                family: Theme.fontFamily
+                                pixelSize: Theme.microSize
+                                letterSpacing: 0.3
+                            }
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            id: aArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                root.currentAlbumName = model.name
+                                root.currentAlbumCid = model.cid
+                                root.currentAlbumCover = model.coverUrl
+                                root.currentAlbumArtist = model.artist || ""
+                                songModel.clear()
+                                root.loadingDetail = true
+                                root.mode = "detail"
+                                networkManager.getAlbumDetail(model.cid)
+                            }
                         }
                     }
 
-                    GridView {
-                        id: albumsGrid
-                        anchors.fill: parent
-                        anchors.leftMargin: 96
-                        anchors.rightMargin: 32
-                        // ★ 恢复：让内容能滚进遮罩区（模糊效果可见）
-                        anchors.topMargin: 8
-                        anchors.bottomMargin: 8
-                        clip: true
+                    ScrollBar.vertical: ScrollBar {
+                        active: true
+                        policy: ScrollBar.AsNeeded
+                        width: 4
+                        contentItem: Rectangle { color: Theme.textMuted; opacity: 0.35 }
+                    }
+                }
+            }
+        }
+    }
 
-                        property int columns: 5
-                        property int gap: 24
+    // ══════════════════════════════════════════════════════════
+    // 详情态
+    // ══════════════════════════════════════════════════════════
+    Item {
+        anchors.fill: parent
+        opacity: root.showingDetail ? 1 : 0
+        visible: opacity > 0.01
+        x: root.showingDetail ? 0 : 40
+        Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
 
-                        cellWidth: Math.max(1, width / columns)
-                        cellHeight: Math.max(1, cellWidth + 64)
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Theme.contentSideMargin
+            anchors.rightMargin: Theme.contentSideMargin
+            spacing: 0
 
-                        model: albumModel
+            // 返回
+            Item {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 40
 
-                        delegate: Item {
-                            width: albumsGrid.cellWidth
-                            height: albumsGrid.cellHeight
+                Row {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 10
 
-                            property bool isHover: aArea.containsMouse
+                    Text {
+                        text: "←"
+                        color: backArea.containsMouse ? Theme.accentHover : Theme.textDim
+                        font { family: Theme.monoFamily; pixelSize: Theme.fs(13) }
+                    }
 
-                            Column {
-                                anchors {
-                                    left: parent.left
-                                    right: parent.right
-                                    top: parent.top
-                                    leftMargin: albumsGrid.gap / 2
-                                    rightMargin: albumsGrid.gap / 2
-                                }
-                                spacing: 6
+                    Text {
+                        text: "返回曲目资料库"
+                        color: backArea.containsMouse ? Theme.accentHover : Theme.textDim
+                        font { family: Theme.fontFamily; pixelSize: Theme.fs(11.5) }
+                    }
 
-                                Item {
-                                    id: coverItem
-                                    width: parent.width
-                                    height: parent.width
-
-                                    property real cornerRadius: 10
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: coverItem.cornerRadius
-                                        color: Theme.panelAlt
-                                    }
-
-                                    Image {
-                                        id: coverImg
-                                        anchors.fill: parent
-                                        source: model.coverUrl || ""
-                                        fillMode: Image.PreserveAspectCrop
-                                        asynchronous: true
-                                        cache: true
-                                        sourceSize.width: 400
-                                        sourceSize.height: 400
-                                        visible: false
-                                        layer.enabled: true
-                                    }
-
-                                    Item {
-                                        id: coverMaskSource
-                                        anchors.fill: parent
-                                        visible: false
-                                        layer.enabled: true
-
-                                        Rectangle {
-                                            anchors.fill: parent
-                                            radius: coverItem.cornerRadius
-                                            color: "white"
-                                        }
-                                    }
-
-                                    MultiEffect {
-                                        anchors.fill: parent
-                                        source: coverImg
-                                        visible: coverImg.status === Image.Ready
-                                        maskEnabled: true
-                                        maskSource: coverMaskSource
-                                        enabled: false
-                                    }
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "♪"
-                                        color: Theme.textMuted
-                                        font.pixelSize: 28
-                                        visible: coverImg.status !== Image.Ready
-                                    }
-
-                                    transform: Scale {
-                                        origin.x: coverItem.width / 2
-                                        origin.y: coverItem.height / 2
-                                        xScale: isHover ? 1.03 : 1.0
-                                        yScale: isHover ? 1.03 : 1.0
-                                        Behavior on xScale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-                                        Behavior on yScale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-                                    }
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: coverItem.cornerRadius
-                                        color: "#000000"
-                                        opacity: isHover ? 0.35 : 0
-                                        enabled: false
-                                        Behavior on opacity { NumberAnimation { duration: 150 } }
-
-                                        Rectangle {
-                                            anchors.centerIn: parent
-                                            width: 36; height: 36; radius: 18
-                                            color: Theme.accent
-                                            scale: isHover ? 1.0 : 0.7
-                                            opacity: isHover ? 1 : 0
-                                            Behavior on scale { NumberAnimation { duration: 220 } }
-                                            Behavior on opacity { NumberAnimation { duration: 220 } }
-
-                                            Text {
-                                                anchors.centerIn: parent
-                                                text: "→"
-                                                color: Theme.darkMode ? "#000000" : "#ffffff"
-                                                font.pixelSize: 16
-                                                font.bold: true
-                                            }
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    width: parent.width
-                                    text: model.name || ""
-                                    color: isHover ? Theme.accent : Theme.text
-                                    font { family: Theme.fontFamily; pixelSize: Theme.fs(12); weight: Font.Medium }
-                                    elide: Text.ElideRight
-                                    maximumLineCount: 2
-                                    wrapMode: Text.Wrap
-                                    Behavior on color { ColorAnimation { duration: 120 } }
-                                }
-
-                                Text {
-                                    width: parent.width
-                                    text: model.artist || ""
-                                    color: Theme.textDim
-                                    font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
-                                    elide: Text.ElideRight
-                                }
-                            }
-
-                            MouseArea {
-                                id: aArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    root.currentAlbumName = model.name
-                                    root.currentAlbumCid = model.cid
-                                    root.currentAlbumCover = model.coverUrl
-                                    root.currentAlbumArtist = model.artist || ""
-                                    root.mode = "detail"
-                                    songModel.clear()
-                                    networkManager.getAlbumDetail(model.cid)
-                                }
-                            }
-                        }
-
-                        ScrollBar.vertical: ScrollBar {
-                            active: true; policy: ScrollBar.AsNeeded; width: 6
-                            contentItem: Rectangle { radius: 3; color: Theme.textMuted; opacity: 0.4 }
+                    Text {
+                        text: "ESC"
+                        color: Theme.textMuted
+                        font {
+                            family: Theme.monoFamily
+                            pixelSize: Theme.microSize
+                            letterSpacing: 1.2
                         }
                     }
                 }
 
-                // ============================================================
-                // 专辑详情（避开遮罩）
-                // ============================================================
-                Item {
+                MouseArea {
+                    id: backArea
                     anchors.fill: parent
-                    opacity: root.showingDetail ? 1 : 0
-                    x: root.showingDetail ? 0 : 60
-                    visible: opacity > 0.01
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.backToAlbums()
+                }
+            }
 
-                    Behavior on opacity { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
-                    Behavior on x { NumberAnimation { duration: 280; easing.type: Easing.OutCubic } }
+            Hairline { Layout.fillWidth: true }
 
-                    ColumnLayout {
-                        anchors {
-                            fill: parent
-                            leftMargin: 96
-                            rightMargin: 32
-                            topMargin: 60
-                            bottomMargin: 130
-                        }
-                        spacing: 18
+            // 主体：左资料栏 + 右曲目表
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.topMargin: 22
+                spacing: 40
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 180
-                            spacing: 24
+                // ── 左资料栏 ─────────────────────────────────
+                Item {
+                    Layout.preferredWidth: 244
+                    Layout.fillHeight: true
 
-                            Item {
-                                Layout.preferredWidth: 180
-                                Layout.preferredHeight: 180
+                    Column {
+                        anchors { left: parent.left; right: parent.right; top: parent.top }
+                        spacing: 0
 
-                                property real cornerRadius: 12
+                        Rectangle {
+                            width: parent.width
+                            height: parent.width
+                            color: Theme.panelAlt
 
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: parent.cornerRadius
-                                    color: Theme.panelAlt
-                                }
-
-                                Image {
-                                    id: bigCoverImg
-                                    anchors.fill: parent
-                                    source: root.currentAlbumCover || ""
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                    cache: true
-                                    sourceSize.width: 360
-                                    sourceSize.height: 360
-                                    visible: false
-                                    layer.enabled: true
-                                }
-
-                                Item {
-                                    id: bigCoverMask
-                                    anchors.fill: parent
-                                    visible: false
-                                    layer.enabled: true
-
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: parent.parent.cornerRadius
-                                        color: "white"
-                                    }
-                                }
-
-                                MultiEffect {
-                                    anchors.fill: parent
-                                    source: bigCoverImg
-                                    visible: bigCoverImg.status === Image.Ready
-                                    maskEnabled: true
-                                    maskSource: bigCoverMask
-                                    enabled: false
-                                }
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "♪"
-                                    color: Theme.textMuted
-                                    font.pixelSize: 56
-                                    visible: bigCoverImg.status !== Image.Ready
-                                }
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    anchors.topMargin: 8
-                                    anchors.leftMargin: 4
-                                    radius: parent.cornerRadius
-                                    color: Theme.shadowDeep
-                                    opacity: 0.35
-                                    z: -1
-                                    enabled: false
-                                }
+                            Image {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                source: root.currentAlbumCover || ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                cache: true
+                                sourceSize.width: 768
+                                sourceSize.height: 768
+                                smooth: true
+                                mipmap: true
                             }
 
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.alignment: Qt.AlignVCenter
-                                spacing: 10
+                            Rectangle {
+                                anchors.fill: parent
+                                color: "transparent"
+                                border.width: 1
+                                border.color: Theme.darkMode ? "#26FFFFFF" : "#33000000"
+                            }
+                        }
+
+                        Item { width: 1; height: 18 }
+
+                        MicroLabel {
+                            text: "ALBUM / 专辑"
+                        }
+
+                        Item { width: 1; height: 6 }
+
+                        Text {
+                            width: parent.width
+                            text: root.currentAlbumName || "专辑"
+                            color: Theme.text
+                            font {
+                                family: Theme.displayFamily
+                                pixelSize: Theme.fs(19)
+                                bold: true
+                                letterSpacing: 0.3
+                            }
+                            wrapMode: Text.Wrap
+                        }
+
+                        Item { width: 1; height: 6 }
+
+                        Text {
+                            width: parent.width
+                            text: root.currentAlbumArtist || "MONSTER SIREN RECORDS"
+                            color: Theme.textDim
+                            font {
+                                family: Theme.fontFamily
+                                pixelSize: Theme.fs(11.5)
+                            }
+                            wrapMode: Text.Wrap
+                        }
+
+                        Item { width: 1; height: 18 }
+
+                        // 技术信息：两列小字
+                        Repeater {
+                            model: [
+                                { k: "SOURCE / 来源", v: "MONSTER SIREN" },
+                                { k: "CATALOG / 编号", v: root.currentAlbumCid || "—" },
+                                { k: "TRACKS / 曲目", v: songModel.count + " TRACKS" }
+                            ]
+
+                            delegate: Column {
+                                width: parent.width
+                                spacing: 3
 
                                 Text {
-                                    text: root.currentAlbumName || "专辑"
-                                    color: Theme.text
+                                    text: modelData.k
+                                    color: Theme.textMuted
                                     font {
-                                        family: Theme.fontFamily
-                                        pixelSize: Theme.fs(28)
-                                        bold: true
-                                        letterSpacing: 0.3
+                                        family: Theme.monoFamily
+                                        pixelSize: Theme.microSize
+                                        letterSpacing: 1.2
                                     }
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
                                 }
 
                                 Text {
-                                    text: root.currentAlbumArtist || "Monster Siren Records"
+                                    width: parent.width
+                                    text: modelData.v
                                     color: Theme.textDim
                                     font {
-                                        family: Theme.fontFamily
-                                        pixelSize: Theme.fs(14)
-                                        letterSpacing: 0.2
+                                        family: Theme.monoFamily
+                                        pixelSize: Theme.labelSize
+                                        letterSpacing: 0.6
                                     }
                                     elide: Text.ElideRight
-                                    Layout.fillWidth: true
                                 }
 
-                                RowLayout {
-                                    spacing: 12
+                                Item { width: 1; height: 10 }
+                            }
+                        }
 
-                                    Rectangle {
-                                        Layout.preferredHeight: 24
-                                        Layout.preferredWidth: countText.implicitWidth + 20
-                                        radius: 12
-                                        color: Theme.darkMode ? "#1effffff" : "#0a000000"
-                                        enabled: false
+                        Hairline { width: parent.width }
+
+                        Item { width: 1; height: 12 }
+
+                        Text {
+                            width: parent.width
+                            text: "该唱片收录于塞壬唱片资料库，曲目可直接播放。"
+                            color: Theme.textMuted
+                            font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
+                            wrapMode: Text.Wrap
+                            lineHeight: 1.5
+                        }
+                    }
+                }
+
+                // ── 右曲目表 ─────────────────────────────────
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 0
+
+                        // 标题 + 播放全部
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 12
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.currentAlbumName || "专辑"
+                                color: Theme.text
+                                font {
+                                    family: Theme.displayFamily
+                                    pixelSize: Theme.fs(30)
+                                    bold: true
+                                    letterSpacing: 0.2
+                                }
+                                elide: Text.ElideRight
+                            }
+
+                            RowLayout {
+                                spacing: 16
+
+                                // 播放全部
+                                Rectangle {
+                                    Layout.preferredWidth: playAllRow.implicitWidth + 36
+                                    Layout.preferredHeight: 34
+                                    color: playAllArea.containsMouse ? Theme.accentHover : Theme.accent
+                                    Behavior on color { ColorAnimation { duration: Theme.animFast } }
+
+                                    Row {
+                                        id: playAllRow
+                                        anchors.centerIn: parent
+                                        spacing: 9
 
                                         Text {
-                                            id: countText
-                                            anchors.centerIn: parent
-                                            text: songModel.count + " 首歌曲"
-                                            color: Theme.textDim
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "▶"
+                                            color: Theme.ink
+                                            font { family: Theme.monoFamily; pixelSize: Theme.fs(9) }
+                                        }
+                                        Text {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "播放全部"
+                                            color: Theme.ink
                                             font {
                                                 family: Theme.fontFamily
-                                                pixelSize: Theme.fs(11)
+                                                pixelSize: Theme.fs(12)
+                                                weight: Font.DemiBold
+                                                letterSpacing: 0.4
                                             }
                                         }
                                     }
+
+                                    MouseArea {
+                                        id: playAllArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        enabled: songModel.count > 0
+                                        onClicked: {
+                                            var list = []
+                                            for (var i = 0; i < songModel.count; i++) {
+                                                var item = songModel.get(i)
+                                                list.push({
+                                                    cid: item.cid,
+                                                    name: item.name,
+                                                    artist: item.artist,
+                                                    cover: root.currentAlbumCover
+                                                })
+                                            }
+                                            root.playListRequested(list, 0)
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: songModel.count + " TRACKS"
+                                    color: Theme.textMuted
+                                    font {
+                                        family: Theme.monoFamily
+                                        pixelSize: Theme.labelSize
+                                        letterSpacing: 1.4
+                                    }
                                 }
                             }
                         }
 
-                        Rectangle {
+                        Item { width: 1; height: 14 }
+
+                        // 表头
+                        Item {
                             Layout.fillWidth: true
-                            height: 1
-                            color: Theme.borderLight
-                            opacity: 0.6
-                            enabled: false
+                            Layout.preferredHeight: 26
+
+                            RowLayout {
+                                anchors.fill: parent
+                                spacing: 16
+
+                                MicroLabel {
+                                    Layout.preferredWidth: 34
+                                    text: "#"
+                                }
+                                MicroLabel {
+                                    Layout.fillWidth: true
+                                    text: "TITLE / 曲目"
+                                }
+                                MicroLabel {
+                                    Layout.preferredWidth: 260
+                                    text: "ARTIST / 歌手"
+                                    visible: parent.width > 620
+                                }
+                                MicroLabel {
+                                    Layout.preferredWidth: 54
+                                    text: "PLAY"
+                                    horizontalAlignment: Text.AlignRight
+                                }
+                            }
                         }
 
-                        ListView {
-                            id: songListView
+                        Hairline { Layout.fillWidth: true }
+
+                        // 曲目列表
+                        Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true
-                            spacing: 4
-                            model: songModel
 
-                            delegate: Item {
-                                width: songListView.width
-                                height: 60
-                                property bool isHover: sArea.containsMouse
+                            Text {
+                                anchors.centerIn: parent
+                                visible: root.loadingDetail && songModel.count === 0
+                                text: "读取曲目…"
+                                color: Theme.textMuted
+                                font {
+                                    family: Theme.monoFamily
+                                    pixelSize: Theme.labelSize
+                                    letterSpacing: 1.6
+                                }
+                            }
 
-                                Rectangle {
-                                    anchors.fill: parent
-                                    anchors.topMargin: 2; anchors.bottomMargin: 2
-                                    radius: Theme.radius
-                                    color: isHover ? Theme.hover : "transparent"
-                                    enabled: false
-                                    Behavior on color { ColorAnimation { duration: 120 } }
+                            Text {
+                                anchors.centerIn: parent
+                                visible: !root.loadingDetail && songModel.count === 0
+                                text: "此专辑暂无曲目"
+                                color: Theme.textMuted
+                                font { family: Theme.fontFamily; pixelSize: Theme.fs(12) }
+                            }
+
+                            ListView {
+                                id: songListView
+                                anchors.fill: parent
+                                clip: true
+                                spacing: 0
+                                model: songModel
+                                visible: songModel.count > 0
+                                bottomMargin: 10
+
+                                delegate: Item {
+                                    width: songListView.width
+                                    height: Theme.rowHeight
+
+                                    property bool isHover: sArea.containsMouse
 
                                     Rectangle {
-                                        anchors { left: parent.left; verticalCenter: parent.verticalCenter }
-                                        width: 3
-                                        height: isHover ? 28 : 0
-                                        radius: 1.5
-                                        color: Theme.accent
-                                        enabled: false
-                                        Behavior on height {
-                                            NumberAnimation {
-                                                duration: Theme.animNormal
-                                                easing.type: Easing.OutCubic
-                                            }
-                                        }
-                                    }
-                                }
-
-                                RowLayout {
-                                    anchors { fill: parent; leftMargin: 16; rightMargin: 16 }
-                                    spacing: 16
-
-                                    Text {
-                                        Layout.preferredWidth: 28
-                                        text: (index + 1).toString().padStart(2, "0")
-                                        color: isHover ? Theme.accent : Theme.textDim
-                                        font {
-                                            family: Theme.fontFamily
-                                            pixelSize: Theme.fs(13)
-                                            bold: isHover
-                                        }
-                                        horizontalAlignment: Text.AlignHCenter
-                                        Behavior on color { ColorAnimation { duration: 120 } }
+                                        anchors.fill: parent
+                                        color: isHover ? Theme.hover : "transparent"
+                                        Behavior on color { ColorAnimation { duration: 100 } }
                                     }
 
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 2
+                                    RowLayout {
+                                        anchors { fill: parent; leftMargin: 2; rightMargin: 6 }
+                                        spacing: 16
 
                                         Text {
+                                            Layout.preferredWidth: 34
+                                            text: isHover ? "▶"
+                                                       : (index + 1).toString().padStart(2, "0")
+                                            color: isHover ? Theme.accentHover : Theme.textMuted
+                                            font {
+                                                family: Theme.monoFamily
+                                                pixelSize: Theme.fs(10)
+                                                letterSpacing: 0.8
+                                            }
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
                                             text: model.name || ""
                                             color: Theme.text
                                             font {
                                                 family: Theme.fontFamily
-                                                pixelSize: Theme.fs(14)
-                                                weight: Font.Medium
+                                                pixelSize: Theme.fs(13)
+                                                weight: Font.Normal
                                             }
                                             elide: Text.ElideRight
-                                            Layout.fillWidth: true
                                         }
 
                                         Text {
+                                            Layout.preferredWidth: 260
+                                            visible: parent.width > 620
                                             text: model.artist || ""
                                             color: Theme.textDim
                                             font {
                                                 family: Theme.fontFamily
-                                                pixelSize: Theme.fs(12)
+                                                pixelSize: Theme.fs(11.5)
                                             }
                                             elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                            visible: text !== ""
                                         }
-                                    }
-
-                                    Rectangle {
-                                        Layout.preferredWidth: 34
-                                        Layout.preferredHeight: 34
-                                        radius: 17
-                                        color: Theme.accent
-                                        opacity: isHover ? 1 : 0
-                                        scale: isHover ? 1.0 : 0.8
-                                        enabled: false
-                                        Behavior on opacity { NumberAnimation { duration: 150 } }
-                                        Behavior on scale { NumberAnimation { duration: 150 } }
 
                                         Text {
-                                            anchors.centerIn: parent
-                                            text: "▶"
-                                            color: Theme.darkMode ? "#000000" : "#ffffff"
-                                            font { pixelSize: 12; bold: true }
+                                            Layout.preferredWidth: 54
+                                            text: "PLAY ↗"
+                                            horizontalAlignment: Text.AlignRight
+                                            color: isHover ? Theme.accentHover : "transparent"
+                                            font {
+                                                family: Theme.monoFamily
+                                                pixelSize: Theme.microSize
+                                                letterSpacing: 0.8
+                                            }
+                                        }
+                                    }
+
+                                    Hairline {
+                                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                                        opacity: isHover ? 0 : 0.45
+                                    }
+
+                                    MouseArea {
+                                        id: sArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            var list = []
+                                            for (var i = 0; i < songModel.count; i++) {
+                                                var item = songModel.get(i)
+                                                list.push({
+                                                    cid: item.cid,
+                                                    name: item.name,
+                                                    artist: item.artist,
+                                                    cover: root.currentAlbumCover
+                                                })
+                                            }
+                                            root.playListRequested(list, index)
                                         }
                                     }
                                 }
 
-                                MouseArea {
-                                    id: sArea; anchors.fill: parent; hoverEnabled: true
-                                    onClicked: {
-                                        var list = []
-                                        for (var i = 0; i < songModel.count; i++) {
-                                            var item = songModel.get(i)
-                                            list.push({
-                                                cid: item.cid,
-                                                name: item.name,
-                                                artist: item.artist,
-                                                cover: root.currentAlbumCover
-                                            })
-                                        }
-                                        root.playListRequested(list, index)
-                                    }
+                                ScrollBar.vertical: ScrollBar {
+                                    active: true
+                                    policy: ScrollBar.AsNeeded
+                                    width: 4
+                                    contentItem: Rectangle { color: Theme.textMuted; opacity: 0.35 }
                                 }
-
-                                Rectangle {
-                                    anchors.bottom: parent.bottom
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.leftMargin: 16
-                                    anchors.rightMargin: 16
-                                    height: 1
-                                    color: Theme.borderLight
-                                    visible: !isHover && index < songModel.count - 1
-                                    enabled: false
-                                }
-                            }
-
-                            ScrollBar.vertical: ScrollBar {
-                                active: true; policy: ScrollBar.AsNeeded; width: 6
-                                contentItem: Rectangle { radius: 3; color: Theme.textMuted; opacity: 0.4 }
                             }
                         }
                     }
-                }
-
-                // 顶部遮罩
-                Rectangle {
-                    anchors {
-                        top: parent.top
-                        left: parent.left
-                        right: parent.right
-                    }
-                    height: 80
-                    topLeftRadius: Theme.windowFullscreen ? Theme.radiusWindow : 0
-                    topRightRadius: Theme.windowFullscreen ? Theme.radiusWindow : 0
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.windowTop(1.0) }
-                        GradientStop { position: 0.5; color: Theme.windowTop(0.65) }
-                        GradientStop { position: 1.0; color: Theme.windowTop(0.0) }
-                    }
-                    z: 100
-                    enabled: false
-                }
-
-                // 底部遮罩
-                Rectangle {
-                    anchors {
-                        bottom: parent.bottom
-                        left: parent.left
-                        right: parent.right
-                    }
-                    height: 100
-                    bottomLeftRadius: Theme.radiusWindow
-                    bottomRightRadius: Theme.radiusWindow
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.windowBottom(0.0) }
-                        GradientStop { position: 0.5; color: Theme.windowBottom(0.65) }
-                        GradientStop { position: 1.0; color: Theme.windowBottom(1.0) }
-                    }
-                    z: 100
-                    enabled: false
                 }
             }
         }
@@ -785,6 +854,7 @@ Item {
         function onAlbumDetailReady(albumCid, songs) {
             console.log("[QML] album", albumCid, "songs:", songs.length)
             if (albumCid !== root.currentAlbumCid) return
+            root.loadingDetail = false
             songModel.clear()
             for (let i = 0; i < songs.length; i++) {
                 let s = songs[i]

@@ -2,7 +2,9 @@
 #include "StreamAudioPlayer.h"
 #include <QDebug>
 #include <QUrl>
-#include <QTimer>
+#include <QAudioBufferOutput>
+#include <QAudioBuffer>
+#include <cmath>
 
 AudioEngine::AudioEngine(QObject *parent)
     : QObject(parent),
@@ -12,58 +14,54 @@ AudioEngine::AudioEngine(QObject *parent)
 
     m_player->setAudioOutput(m_audioOutput);
     m_audioOutput->setVolume(m_volume);
+    m_clock.start();
 
-    // ---- QMediaPlayer 信号 ----
+    // 拿到 QMediaPlayer 解码后的 PCM，用来做鼓点/响度检测。
+    // 注意：只有非流式播放（本地文件等）走这里；流式播放由
+    // StreamAudioPlayer 在写音频设备前自己算。
+    m_bufferOutput = new QAudioBufferOutput(this);
+    m_player->setAudioBufferOutput(m_bufferOutput);
+    connect(m_bufferOutput, &QAudioBufferOutput::audioBufferReceived,
+            this, [this](const QAudioBuffer &buffer) {
+        if (m_usingStream || !buffer.isValid()) return;
+
+        const QAudioFormat fmt = buffer.format();
+        if (fmt != m_beatFormat) {
+            m_beatFormat = fmt;
+            m_beat.setFormat(fmt);
+        }
+
+        float level = 0.0f;
+        const bool isBeat = m_beat.feed(buffer.constData<uchar>(),
+                                        int(buffer.byteCount()),
+                                        m_clock.elapsed(), level);
+        publishLevel(level);
+        if (isBeat) publishBeat(m_beat.strength());
+    });
+
+    // QMediaPlayer 信号
     connect(m_player, &QMediaPlayer::playingChanged, this, [this]() {
-        qDebug() << "[QMediaPlayer] playingChanged =" << m_player->isPlaying();
         if (!m_usingStream) emit playbackStateChanged(m_player->isPlaying());
     });
     connect(m_player, &QMediaPlayer::positionChanged, this, [this](qint64 p) {
         if (!m_usingStream) emit positionChanged(p);
     });
     connect(m_player, &QMediaPlayer::durationChanged, this, [this](qint64 d) {
-        qDebug() << "[QMediaPlayer] durationChanged =" << d << "ms";
         if (!m_usingStream) emit durationChanged(d);
     });
     connect(m_player, &QMediaPlayer::mediaStatusChanged, this,
             [this](QMediaPlayer::MediaStatus s) {
-        QString status;
-        switch (s) {
-        case QMediaPlayer::NoMedia:         status = "NoMedia"; break;
-        case QMediaPlayer::LoadingMedia:    status = "LoadingMedia"; break;
-        case QMediaPlayer::LoadedMedia:     status = "LoadedMedia"; break;
-        case QMediaPlayer::StalledMedia:    status = "StalledMedia"; break;
-        case QMediaPlayer::BufferingMedia:  status = "BufferingMedia"; break;
-        case QMediaPlayer::BufferedMedia:   status = "BufferedMedia"; break;
-        case QMediaPlayer::EndOfMedia:      status = "EndOfMedia"; break;
-        case QMediaPlayer::InvalidMedia:    status = "InvalidMedia"; break;
-        }
-        qDebug() << "[QMediaPlayer] mediaStatus =" << status;
-
         if (m_usingStream) return;
-
-        if (s == QMediaPlayer::LoadedMedia
-            || s == QMediaPlayer::BufferedMedia) {
-            // 加载成功 → 停止回退定时器
-            if (m_fallbackTimer) m_fallbackTimer->stop();
-        }
-
         if (s == QMediaPlayer::EndOfMedia && m_loopMode != 1) {
             emit trackFinished();
         }
     });
     connect(m_player, &QMediaPlayer::errorOccurred, this,
-            [this](QMediaPlayer::Error e, const QString &msg) {
+            [](QMediaPlayer::Error e, const QString &msg) {
         qWarning() << "[QMediaPlayer] error:" << e << msg;
-        // 错误 → 尝试回退到流式播放
-        if (!m_usingStream && !m_currentUrl.isEmpty()) {
-            qDebug() << "[AudioEngine] QMediaPlayer failed, fallback to stream";
-            switchToStreamPlayer();
-            m_stream->start(m_currentUrl);
-        }
     });
 
-    // ---- StreamAudioPlayer 信号转发 ----
+    // StreamAudioPlayer 信号
     connect(m_stream, &StreamAudioPlayer::positionChanged,
             this, [this](qint64 p) {
         if (m_usingStream) emit positionChanged(p);
@@ -82,62 +80,56 @@ AudioEngine::AudioEngine(QObject *parent)
     });
     connect(m_stream, &StreamAudioPlayer::trackFinished, this, [this]() {
         if (!m_usingStream) return;
-        if (m_loopMode == 1) {
-            m_stream->start(m_currentUrl);
-        } else {
-            emit trackFinished();
-        }
+        if (m_loopMode == 1) m_stream->start(m_currentUrl);
+        else emit trackFinished();
     });
-
-    // ★ 回退定时器：QMediaPlayer 3 秒没起来 → 用 StreamAudioPlayer
-    m_fallbackTimer = new QTimer(this);
-    m_fallbackTimer->setSingleShot(true);
-    m_fallbackTimer->setInterval(3000);
-    connect(m_fallbackTimer, &QTimer::timeout, this, [this]() {
-        if (m_usingStream) return;
-        if (m_currentUrl.isEmpty()) return;
-
-        QMediaPlayer::MediaStatus st = m_player->mediaStatus();
-        if (st == QMediaPlayer::LoadedMedia
-            || st == QMediaPlayer::BufferedMedia
-            || st == QMediaPlayer::BufferingMedia) {
-            qDebug() << "[AudioEngine] fallback cancelled, QMediaPlayer OK";
-            return;
-        }
-
-        qWarning() << "[AudioEngine] QMediaPlayer stuck at" << st
-                   << "→ fallback to StreamAudioPlayer";
-        m_player->stop();
-        switchToStreamPlayer();
-        m_stream->start(m_currentUrl);
+    // 流式播放的鼓点/响度
+    connect(m_stream, &StreamAudioPlayer::beat, this, [this](float s) {
+        if (m_usingStream) publishBeat(s);
+    });
+    connect(m_stream, &StreamAudioPlayer::levelChanged, this, [this](float l) {
+        if (m_usingStream) publishLevel(l);
     });
 
     applyLoopMode();
 }
 
+void AudioEngine::publishBeat(float strength) {
+    emit beat(strength);
+}
+
+void AudioEngine::publishLevel(float level) {
+    m_level = level;
+    // 变化太小就不发信号，避免每帧都刷 QML
+    if (std::abs(level - m_emittedLevel) < 0.004f) return;
+    m_emittedLevel = level;
+    emit levelChanged(level);
+}
+
 AudioEngine::~AudioEngine() = default;
 
+// ============================================================
+// play：远程 WAV → 流式播放；其它 → QMediaPlayer
+// ============================================================
 bool AudioEngine::play(const QString &url) {
     qDebug() << "[AudioEngine] play() url=" << url;
     if (url.isEmpty()) return false;
 
     m_currentUrl = url;
 
-    // 清空旧的流式状态
-    if (m_usingStream) {
-        m_stream->stop();
-        setBuffering(false);
-        m_usingStream = false;
-        qDebug() << "[AudioEngine] switched from stream to QMediaPlayer";
+    bool isRemote = url.startsWith("http://") || url.startsWith("https://");
+    bool isWav = url.endsWith(".wav", Qt::CaseInsensitive);
+
+    if (isRemote && isWav) {
+        // 流式播放，立即出声音
+        switchToStreamPlayer();
+        return m_stream->start(url);
     }
 
-    // ★ 先试 QMediaPlayer
+    // 其它走 QMediaPlayer
+    switchToMediaPlayer();
     m_player->setSource(QUrl(url));
     m_player->play();
-
-    // 启动回退定时器
-    if (m_fallbackTimer) m_fallbackTimer->start();
-
     return true;
 }
 
@@ -152,16 +144,21 @@ void AudioEngine::resume() {
 }
 
 void AudioEngine::stop() {
-    if (m_fallbackTimer) m_fallbackTimer->stop();
     if (m_usingStream) m_stream->stop();
     else m_player->stop();
+    m_beat.reset();
+    publishLevel(0.0f);
+    m_emittedLevel = -1.0f;
     setBuffering(false);
 }
 
 void AudioEngine::setVolume(float v) {
-    m_volume = qBound(0.0f, v, 1.0f);
+    v = qBound(0.0f, v, 1.0f);
+    if (qFuzzyCompare(m_volume, v)) return;
+    m_volume = v;
     m_audioOutput->setVolume(m_volume);
     m_stream->setVolume(m_volume);
+    emit volumeChanged(m_volume);
 }
 
 void AudioEngine::seek(qint64 ms) {
@@ -187,7 +184,7 @@ qint64 AudioEngine::duration() const {
 int AudioEngine::loopMode() const { return m_loopMode; }
 
 void AudioEngine::setLoopMode(int mode) {
-    mode = ((mode % 3) + 3) % 3;
+    mode = ((mode % 4) + 4) % 4;
     if (m_loopMode == mode) return;
     m_loopMode = mode;
     applyLoopMode();
@@ -195,15 +192,12 @@ void AudioEngine::setLoopMode(int mode) {
 }
 
 void AudioEngine::applyLoopMode() {
-    if (m_loopMode == 1) {
-        m_player->setLoops(QMediaPlayer::Infinite);
-    } else {
-        m_player->setLoops(1);
-    }
+    if (m_loopMode == 1) m_player->setLoops(QMediaPlayer::Infinite);
+    else m_player->setLoops(1);
 }
 
 void AudioEngine::cycleLoopMode() {
-    setLoopMode((m_loopMode + 1) % 3);
+    setLoopMode((m_loopMode + 1) % 4);
 }
 
 void AudioEngine::setBuffering(bool b) {
@@ -216,7 +210,7 @@ void AudioEngine::setBuffering(bool b) {
 void AudioEngine::switchToStreamPlayer() {
     if (m_usingStream) return;
     m_player->stop();
-    setBuffering(false);
+    setBuffering(true);
     m_usingStream = true;
     qDebug() << "[AudioEngine] → STREAM player";
 }

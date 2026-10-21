@@ -1,11 +1,20 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Effects
 
+// ============================================================
+// 底部播放条
+//
+//  ──────────────────────────────────────────────────  ← 2px 进度线
+//  [cover] 曲名                        循环  ‹  (▶)  ›  歌词        音量 ▮▮▮▮▮   队列
+//          歌手 / MASS                00:00 / 00:00
+//
+// 没有胶囊、没有玻璃：整条贴在窗口底边，上面一条细线，
+// 进度用最顶端的 2px 线表示，播放键是整条里唯一的实心色块。
+// ============================================================
 Item {
     id: root
-    implicitHeight: Theme.playerBarHeight + Theme.playerBarBottomMargin * 2
+    implicitHeight: Theme.playerBarHeight
 
     signal fullscreenClicked()
     signal prevClicked()
@@ -25,6 +34,15 @@ Item {
     property bool buffering: false
 
     property real downloadProgress: -1
+    property Item backgroundSource: null
+
+    readonly property bool pickerVisible: pickerDialog.visible
+
+    function openPickerDialog() {
+        if (root.songCid === "") return
+        pickerDialog.openFor(root.songCid, root.title, root.artist, root.coverUrl)
+    }
+    function closePicker() { pickerDialog.close() }
 
     Connections {
         target: audioEngine
@@ -57,734 +75,521 @@ Item {
 
     onSongCidChanged: root.downloadProgress = -1
 
-    Rectangle {
-        id: glowSource
-        anchors.fill: pill
-        anchors.margins: -36
-        radius: pill.radius + 24
-        color: Theme.darkMode ? "#60ffffff" : "#40000000"
-        visible: false
-        layer.enabled: true
-        enabled: false
+    // 拦截空白区域点击，避免穿透到下面的列表
+    MouseArea {
+        anchors.fill: parent
+        z: -100
+        onClicked: (mouse) => { mouse.accepted = true }
     }
 
-    MultiEffect {
-        source: glowSource
-        anchors.fill: glowSource
-        blurEnabled: true
-        blur: 1.5
-        blurMax: 96
-        opacity: root.playing ? 0.85 : 0.65
-        enabled: false
-        Behavior on opacity { NumberAnimation { duration: 300 } }
+    // ── 背景 + 顶部细线 ────────────────────────────────────────
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.bg
     }
 
     Rectangle {
-        anchors.fill: pill
-        anchors.topMargin: 6
-        anchors.bottomMargin: -6
-        anchors.leftMargin: 2
-        anchors.rightMargin: 2
-        radius: Theme.radiusPill
-        color: Theme.shadowDeep
-        opacity: 0.45
-        enabled: false
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        height: 1
+        color: Theme.border
+        opacity: 0.55
     }
 
-    Rectangle {
-        id: pill
-        anchors.centerIn: parent
-        width: Math.min(Theme.playerBarMaxWidth, parent.width - Theme.playerBarMargin * 2)
-        height: Theme.playerBarHeight
-        radius: height / 2
-        clip: true
+    // ── 进度线（贴在最顶部，拖动可跳转）────────────────────────
+    Item {
+        id: progressArea
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        height: 10
+        z: 5
 
-        color: Theme.darkMode ? Qt.rgba(0.145, 0.145, 0.149, 0.78)
-                              : Qt.rgba(0.953, 0.953, 0.953, 0.55)
+        property bool dragging: false
+        property real dragValue: 0
+        property bool hovering: progressMouse.containsMouse
 
-        Rectangle {
-            anchors { top: parent.top; left: parent.left; right: parent.right }
-            height: parent.height / 2
-            radius: parent.radius
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: Theme.pillHighlight }
-                GradientStop { position: 1.0; color: "#00ffffff" }
-            }
-            opacity: 0.35
-            enabled: false
+        readonly property real displayProgress: {
+            if (dragging) return dragValue
+            if (audioEngine.duration > 0) return audioEngine.position / audioEngine.duration
+            return 0
         }
 
-        RowLayout {
-            anchors {
-                fill: parent
-                leftMargin: 18
-                rightMargin: 18
-                topMargin: 10
-                bottomMargin: 10
-            }
-            spacing: 16
+        Rectangle {
+            anchors.top: parent.top
+            width: parent.width
+            height: (progressArea.hovering || progressArea.dragging) ? 3 : 2
+            color: Theme.border
+            opacity: 0.5
+            antialiasing: true
+            Behavior on height { NumberAnimation { duration: 110 } }
 
-            RowLayout {
-                Layout.preferredWidth: 220
-                Layout.minimumWidth: 180
-                Layout.maximumWidth: 240
-                spacing: 12
-
-                Item {
-                    id: coverArea
-                    Layout.preferredWidth: 56
-                    Layout.preferredHeight: 56
-
-                    property bool isHover: coverMouse.containsMouse
-
-                    Rectangle {
-                        anchors.centerIn: parent
-                        width: parent.width + 6
-                        height: parent.height + 6
-                        radius: width / 2
-                        color: Theme.accent
-                        opacity: root.playing ? 0.28 : 0
-                        enabled: false
-                        Behavior on opacity { NumberAnimation { duration: Theme.animNormal } }
-                    }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: width / 2
-                        color: Theme.panelAlt
-                        enabled: false
-                    }
-
-                    // ★ 提高分辨率 → 消除锯齿
-                    Image {
-                        id: coverImg
-                        anchors.fill: parent
-                        source: root.coverUrl
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        cache: true
-                        sourceSize.width: 224
-                        sourceSize.height: 224
-                        visible: false
-                        layer.enabled: true
-                        layer.smooth: true
-
-                        transformOrigin: Item.Center
-                        RotationAnimation on rotation {
-                            running: root.playing
-                                     && coverImg.status === Image.Ready
-                                     && !coverArea.isHover
-                            from: 0
-                            to: 360
-                            duration: 40000
-                            loops: Animation.Infinite
-                        }
-                    }
-
-                    // ★ mask 用 antialiasing + smooth
-                    Item {
-                        id: maskSourceItem
-                        anchors.fill: parent
-                        visible: false
-                        layer.enabled: true
-                        layer.smooth: true
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: width / 2
-                            color: "white"
-                            antialiasing: true
-                            smooth: true
-                        }
-                    }
-
-                    MultiEffect {
-                        anchors.fill: parent
-                        source: coverImg
-                        visible: coverImg.status === Image.Ready
-                        maskEnabled: true
-                        maskSource: maskSourceItem
-                        smooth: true
-                    }
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "♪"
-                        color: Theme.textMuted
-                        font.pixelSize: 18
-                        visible: coverImg.status !== Image.Ready
-                    }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: width / 2
-                        color: "#000000"
-                        opacity: coverArea.isHover ? 0.55 : 0
-                        enabled: false
-                        Behavior on opacity { NumberAnimation { duration: 150 } }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "⛶"
-                            color: "#ffffff"
-                            font.pixelSize: 20
-                            opacity: coverArea.isHover ? 1 : 0
-                            scale: coverArea.isHover ? 1.0 : 0.6
-                            Behavior on opacity { NumberAnimation { duration: 150 } }
-                            Behavior on scale {
-                                NumberAnimation {
-                                    duration: 150
-                                    easing.type: Easing.OutCubic
-                                }
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: coverMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: root.fullscreenClicked()
-                    }
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 3
-                    Text {
-                        text: root.title || "未播放"
-                        color: Theme.text
-                        font {
-                            family: Theme.fontFamily
-                            pixelSize: Theme.fs(14)
-                            weight: Font.Medium
-                        }
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        text: root.artist || "—"
-                        color: Theme.textDim
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(12) }
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
+            Rectangle {
+                width: parent.width * progressArea.displayProgress
+                height: parent.height
+                color: Theme.accentHover
+                antialiasing: true
+                Behavior on width {
+                    enabled: !progressArea.dragging
+                    NumberAnimation { duration: 80 }
                 }
             }
+        }
 
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.minimumWidth: 300
-                spacing: 6
+        MouseArea {
+            id: progressMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
 
-                RowLayout {
-                    Layout.alignment: Qt.AlignHCenter
-                    spacing: 10
-
-                    Rectangle {
-                        width: 36; height: 36; radius: 18
-                        color: loopBtn.containsMouse ? Theme.hover : "transparent"
-                        Behavior on color { ColorAnimation { duration: Theme.animFast } }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "⟲"
-                            color: audioEngine.loopMode === 0
-                                   ? Theme.textDim
-                                   : Theme.accent
-                            font.pixelSize: Theme.fs(20)
-                            Behavior on color { ColorAnimation { duration: 150 } }
-                        }
-
-                        Rectangle {
-                            visible: audioEngine.loopMode === 1
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.rightMargin: 1
-                            anchors.topMargin: 1
-                            width: 12; height: 12; radius: 6
-                            color: Theme.accent
-                            enabled: false
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "1"
-                                color: Theme.darkMode ? "#000000" : "#ffffff"
-                                font {
-                                    family: Theme.fontFamily
-                                    pixelSize: 8
-                                    bold: true
-                                }
-                            }
-                        }
-
-                        MouseArea {
-                            id: loopBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: audioEngine.cycleLoopMode()
-                        }
-                    }
-
-                    Rectangle {
-                        width: 36; height: 36; radius: 18
-                        color: root.hasPrev && prevBtn.containsMouse
-                               ? Theme.hover : "transparent"
-                        Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                        opacity: root.hasPrev ? 1.0 : 0.35
-                        Text {
-                            anchors.centerIn: parent
-                            text: "◀"
-                            color: root.hasPrev ? Theme.text : Theme.textMuted
-                            font.pixelSize: Theme.fs(16)
-                        }
-                        MouseArea {
-                            id: prevBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            enabled: root.hasPrev
-                            onClicked: root.prevClicked()
-                        }
-                    }
-
-                    Item {
-                        width: 52; height: 52
-
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: 52; height: 52; radius: 26
-                            color: "transparent"
-                            border.color: Theme.accent
-                            border.width: 2
-                            opacity: 0
-                            enabled: false
-                            SequentialAnimation on scale {
-                                running: root.playing && !root.buffering
-                                loops: Animation.Infinite
-                                NumberAnimation {
-                                    to: 1.35; duration: 1400
-                                    easing.type: Easing.OutQuad
-                                }
-                                NumberAnimation { to: 1.0; duration: 0 }
-                            }
-                            SequentialAnimation on opacity {
-                                running: root.playing && !root.buffering
-                                loops: Animation.Infinite
-                                NumberAnimation { to: 0.5; duration: 150 }
-                                NumberAnimation {
-                                    to: 0.0; duration: 1250
-                                    easing.type: Easing.OutQuad
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: 48; height: 48; radius: 24
-                            color: {
-                                if (root.buffering)
-                                    return Theme.darkMode ? "#2a2d2e" : "#dcdcdc"
-                                return playBtn.containsMouse ? Theme.accentHover : Theme.accent
-                            }
-                            scale: playBtn.pressed ? 0.92 : 1.0
-                            Behavior on scale { NumberAnimation { duration: 100 } }
-                            Behavior on color { ColorAnimation { duration: Theme.animFast } }
-
-                            Rectangle {
-                                anchors {
-                                    top: parent.top
-                                    left: parent.left
-                                    right: parent.right
-                                }
-                                anchors.margins: 1
-                                height: parent.height / 2
-                                radius: parent.radius
-                                gradient: Gradient {
-                                    GradientStop { position: 0.0; color: "#30ffffff" }
-                                    GradientStop { position: 1.0; color: "#00ffffff" }
-                                }
-                                opacity: Theme.darkMode ? 0.5 : 0.15
-                                enabled: false
-                            }
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: root.buffering
-                                      ? "◌"
-                                      : (root.playing ? "❚❚" : "▶")
-                                color: root.buffering
-                                       ? Theme.textDim
-                                       : (Theme.darkMode ? "#000000" : "#ffffff")
-                                font {
-                                    family: Theme.fontFamily
-                                    pixelSize: 16
-                                    bold: true
-                                }
-                                SequentialAnimation on opacity {
-                                    running: root.buffering
-                                    loops: Animation.Infinite
-                                    NumberAnimation { to: 0.4; duration: 600 }
-                                    NumberAnimation { to: 1.0; duration: 600 }
-                                }
-                            }
-
-                            MouseArea {
-                                id: playBtn
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    if (audioEngine.isPlaying()) audioEngine.pause()
-                                    else audioEngine.resume()
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 36; height: 36; radius: 18
-                        color: root.hasNext && nextBtn.containsMouse
-                               ? Theme.hover : "transparent"
-                        Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                        opacity: root.hasNext ? 1.0 : 0.35
-                        Text {
-                            anchors.centerIn: parent
-                            text: "▶"
-                            color: root.hasNext ? Theme.text : Theme.textMuted
-                            font.pixelSize: Theme.fs(16)
-                        }
-                        MouseArea {
-                            id: nextBtn
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            enabled: root.hasNext
-                            onClicked: root.nextClicked()
-                        }
-                    }
-
-                    Item { width: 36; height: 36 }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    Text {
-                        text: formatTime(progressArea.dragging
-                                         ? progressArea.dragValue * audioEngine.duration
-                                         : audioEngine.position)
-                        color: progressArea.dragging ? Theme.accent : Theme.textDim
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
-                        Layout.preferredWidth: 38
-                        horizontalAlignment: Text.AlignRight
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                    }
-
-                    Item {
-                        id: progressArea
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 16
-
-                        property bool dragging: false
-                        property real dragValue: 0
-                        property bool hovering: progressMouse.containsMouse
-
-                        readonly property real displayProgress: {
-                            if (dragging) return dragValue
-                            if (audioEngine.duration > 0)
-                                return audioEngine.position / audioEngine.duration
-                            return 0
-                        }
-
-                        Rectangle {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width
-                            height: (progressArea.hovering || progressArea.dragging) ? 5 : 4
-                            radius: 3
-                            color: Theme.borderLight
-                            enabled: false
-                            Behavior on height {
-                                NumberAnimation {
-                                    duration: 120
-                                    easing.type: Easing.OutCubic
-                                }
-                            }
-
-                            Rectangle {
-                                width: parent.width * progressArea.displayProgress
-                                height: parent.height
-                                radius: parent.radius
-                                color: Theme.accent
-                                enabled: false
-
-                                Behavior on width {
-                                    enabled: !progressArea.dragging
-                                    NumberAnimation { duration: 80 }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            anchors.verticalCenter: parent.verticalCenter
-                            x: parent.width * progressArea.displayProgress - width / 2
-                            width: progressArea.dragging ? 16 : (progressArea.hovering ? 14 : 0)
-                            height: width
-                            radius: width / 2
-                            color: Theme.accent
-                            enabled: false
-                            visible: width > 0
-
-                            Behavior on width {
-                                NumberAnimation {
-                                    duration: 120
-                                    easing.type: Easing.OutCubic
-                                }
-                            }
-                        }
-
-                        MouseArea {
-                            id: progressMouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-
-                            function updateDragValue(mx) {
-                                var v = mx / width
-                                if (v < 0) v = 0
-                                if (v > 1) v = 1
-                                progressArea.dragValue = v
-                            }
-
-                            onPressed: (mouse) => {
-                                if (audioEngine.duration <= 0) return
-                                progressArea.dragging = true
-                                updateDragValue(mouse.x)
-                            }
-                            onPositionChanged: (mouse) => {
-                                if (progressArea.dragging) updateDragValue(mouse.x)
-                            }
-                            onReleased: (mouse) => {
-                                if (!progressArea.dragging) return
-                                progressArea.dragging = false
-                                if (audioEngine.duration > 0) {
-                                    audioEngine.seek(progressArea.dragValue * audioEngine.duration)
-                                }
-                            }
-                            onCanceled: progressArea.dragging = false
-                        }
-                    }
-
-                    Text {
-                        text: formatTime(audioEngine.duration)
-                        color: Theme.textDim
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
-                        Layout.preferredWidth: 38
-                    }
-                }
+            function updateDragValue(mx) {
+                var v = mx / width
+                if (v < 0) v = 0
+                if (v > 1) v = 1
+                progressArea.dragValue = v
+                if (appSettings.seekPreview)
+                    audioEngine.seek(progressArea.dragValue * audioEngine.duration)
             }
 
-            RowLayout {
-                Layout.preferredWidth: 300
-                Layout.minimumWidth: 260
-                Layout.maximumWidth: 340
-                spacing: 6
+            onPressed: (mouse) => {
+                if (audioEngine.duration <= 0) return
+                progressArea.dragging = true
+                updateDragValue(mouse.x)
+            }
+            onPositionChanged: (mouse) => {
+                if (progressArea.dragging) updateDragValue(mouse.x)
+            }
+            onReleased: (mouse) => {
+                if (!progressArea.dragging) return
+                progressArea.dragging = false
+                if (audioEngine.duration > 0)
+                    audioEngine.seek(progressArea.dragValue * audioEngine.duration)
+            }
+            onCanceled: progressArea.dragging = false
+        }
+    }
 
-                Item {
-                    width: 34; height: 34
+    // ── 左：封面 + 曲目信息 ────────────────────────────────────
+    Item {
+        id: leftBlock
+        anchors {
+            left: parent.left
+            leftMargin: Math.max(16, Theme.contentSideMargin - 20)
+            verticalCenter: parent.verticalCenter
+            verticalCenterOffset: 2
+        }
+        width: Math.min(260, parent.width * 0.24)
+        height: 52
 
-                    Canvas {
-                        id: progressRing
-                        anchors.fill: parent
-                        visible: root.downloadProgress >= 0
-                        onPaint: {
-                            var ctx = getContext("2d")
-                            ctx.reset()
-                            if (root.downloadProgress < 0) return
+        Rectangle {
+            id: coverBox
+            width: 46; height: 46
+            color: Theme.panelAlt
+            border.width: 1
+            border.color: Theme.border
 
-                            var cx = width / 2
-                            var cy = height / 2
-                            var r = Math.min(cx, cy) - 2
-                            var startAngle = -Math.PI / 2
-                            var endAngle = startAngle + Math.PI * 2 * root.downloadProgress
+            Image {
+                id: coverImage
+                anchors.fill: parent
+                anchors.margins: 1
+                source: root.coverUrl
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                cache: true
+                sourceSize.width: 128
+                sourceSize.height: 128
+                smooth: true
+                mipmap: true
+            }
 
-                            ctx.beginPath()
-                            ctx.strokeStyle = Theme.accent
-                            ctx.lineWidth = 2.5
-                            ctx.lineCap = "round"
-                            ctx.arc(cx, cy, r, startAngle, endAngle, false)
-                            ctx.stroke()
-                        }
-                    }
+            Text {
+                anchors.centerIn: parent
+                visible: coverImage.status !== Image.Ready
+                text: "♪"
+                color: Theme.textMuted
+                font.pixelSize: Theme.fs(14)
+            }
 
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 17
-                        color: dlBtn.containsMouse && root.songCid !== "" && root.downloadProgress < 0
-                               ? Theme.hover : "transparent"
-                        Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                        opacity: root.songCid !== "" ? 1.0 : 0.35
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: root.downloadProgress >= 0 ? "◌" : "↓"
-                            color: root.downloadProgress >= 0
-                                   ? Theme.accent
-                                   : (dlBtn.containsMouse && root.songCid !== ""
-                                      ? Theme.accent : Theme.text)
-                            font {
-                                family: Theme.fontFamily
-                                pixelSize: Theme.fs(18)
-                                bold: true
-                            }
-                            Behavior on color { ColorAnimation { duration: 120 } }
-                        }
-                    }
-
-                    MouseArea {
-                        id: dlBtn
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        enabled: root.songCid !== "" && root.downloadProgress < 0
-                        onClicked: {
-                            if (root.songCid === "") return
-                            // ★ 加 album 参数
-                            audioCache.downloadToLibrary(
-                                root.songCid,
-                                root.title,
-                                root.artist,
-                                root.songAlbum,
-                                root.coverUrl,
-                                root.songUrl
-                            )
-                        }
-                    }
-                }
-
-                Connections {
-                    target: root
-                    function onDownloadProgressChanged() {
-                        progressRing.requestPaint()
-                    }
-                }
-
-                Rectangle {
-                    width: 34; height: 34; radius: 17
-                    color: addToPlBtn.containsMouse && root.songCid !== ""
-                           ? Theme.hover : "transparent"
-                    Behavior on color { ColorAnimation { duration: Theme.animFast } }
-                    opacity: root.songCid !== "" ? 1.0 : 0.35
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "+"
-                        color: addToPlBtn.containsMouse && root.songCid !== ""
-                               ? Theme.accent
-                               : Theme.text
-                        font {
-                            family: Theme.fontFamily
-                            pixelSize: Theme.fs(20)
-                            bold: true
-                        }
-                        Behavior on color { ColorAnimation { duration: 120 } }
-                    }
-
-                    MouseArea {
-                        id: addToPlBtn
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        enabled: root.songCid !== ""
-                        onClicked: {
-                            pickerDialog.openFor(root.songCid,
-                                                 root.title,
-                                                 root.artist,
-                                                 root.coverUrl)
-                        }
-                    }
-                }
-
+            Rectangle {
+                anchors.fill: parent
+                visible: coverHover.hovered
+                color: "#000000"
+                opacity: 0.34
                 Text {
-                    text: "🔊"
-                    color: Theme.textDim
+                    anchors.centerIn: parent
+                    text: "⛶"
+                    color: "#FFFFFF"
                     font.pixelSize: Theme.fs(15)
                 }
+            }
 
-                Slider {
-                    id: volumeSlider
-                    z: 10
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 22
-                    from: 0
-                    to: 1
-                    stepSize: 0
-                    live: true
-                    enabled: true
+            HoverHandler { id: coverHover }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.fullscreenClicked()
+            }
+        }
 
-                    Component.onCompleted: {
-                        value = 0.5
-                        audioEngine.setVolume(value)
-                    }
-                    onMoved: audioEngine.setVolume(value)
+        Column {
+            anchors {
+                left: coverBox.right
+                leftMargin: 14
+                right: parent.right
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: 4
 
-                    background: Rectangle {
-                        x: parent.leftPadding
-                        y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                        width: parent.availableWidth
-                        height: parent.hovered ? 5 : 4
-                        radius: 3
-                        color: Theme.borderLight
-                        enabled: false
-                        Behavior on height { NumberAnimation { duration: 120 } }
+            Text {
+                width: parent.width
+                text: root.title || "尚未播放"
+                color: Theme.text
+                font {
+                    family: Theme.fontFamily
+                    pixelSize: Theme.fs(13)
+                    weight: Font.DemiBold
+                }
+                elide: Text.ElideRight
+            }
 
-                        Rectangle {
-                            width: parent.parent.visualPosition * parent.width
-                            height: parent.height
-                            radius: parent.radius
-                            color: Theme.accent
-                            enabled: false
-                        }
-                    }
+            Text {
+                width: parent.width
+                text: (root.artist || "MASS") + "  /  塞壬唱片"
+                color: Theme.textMuted
+                font {
+                    family: Theme.fontFamily
+                    pixelSize: Theme.microSize
+                    letterSpacing: 0.6
+                }
+                elide: Text.ElideRight
+            }
+        }
+    }
 
-                    handle: Rectangle {
-                        x: parent.leftPadding + parent.visualPosition * (parent.availableWidth - width)
-                        y: parent.topPadding + parent.availableHeight / 2 - height / 2
-                        width: parent.pressed ? 16 : 12
-                        height: width
-                        radius: width / 2
-                        color: Theme.accent
-                        z: 1
-                        Behavior on width { NumberAnimation { duration: 100 } }
+    // ── 中：走带控制 ───────────────────────────────────────────
+    Item {
+        id: centerBlock
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: 2
+        width: 340
+        height: parent.height
+
+        Row {
+            id: transport
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: 16
+            spacing: 18
+
+            // 循环模式
+            Item {
+                width: loopText.implicitWidth
+                height: 46
+
+                readonly property var names: ["顺序", "单曲", "列表", "随机"]
+
+                Text {
+                    id: loopText
+                    anchors.centerIn: parent
+                    text: parent.names[audioEngine.loopMode] || "顺序"
+                    color: loopMouse.containsMouse ? Theme.text : Theme.textMuted
+                    font {
+                        family: Theme.monoFamily
+                        pixelSize: Theme.labelSize
+                        letterSpacing: 1.2
                     }
                 }
 
-                Rectangle {
-                    width: 36; height: 36; radius: 18
-                    color: playlistBtn.containsMouse ? Theme.hover : "transparent"
-                    Behavior on color { ColorAnimation { duration: Theme.animFast } }
+                MouseArea {
+                    id: loopMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: audioEngine.cycleLoopMode()
+                }
+            }
 
-                    Text {
-                        anchors.centerIn: parent
-                        text: "☰"
-                        color: Theme.text
-                        font.pixelSize: Theme.fs(18)
-                    }
+            // 上一首
+            Item {
+                width: 26; height: 46
+                opacity: root.hasPrev ? 1 : 0.3
 
-                    MouseArea {
-                        id: playlistBtn
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: root.playlistClicked()
+                Text {
+                    anchors.centerIn: parent
+                    text: "‹"
+                    color: prevMouse.containsMouse && root.hasPrev ? Theme.text : Theme.textDim
+                    font {
+                        family: Theme.monoFamily
+                        pixelSize: Theme.fs(22)
                     }
                 }
+
+                MouseArea {
+                    id: prevMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    enabled: root.hasPrev
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.prevClicked()
+                }
+            }
+
+            // 播放 / 暂停
+            Rectangle {
+                width: 46; height: 46
+                radius: 0
+                color: root.buffering
+                       ? Theme.panelAlt
+                       : (playMouse.containsMouse ? Theme.accentHover : Theme.accent)
+                antialiasing: true
+                Behavior on color { ColorAnimation { duration: Theme.animFast } }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: root.playing ? "❚❚" : "▶"
+                    color: root.buffering ? Theme.textMuted : Theme.ink
+                    font {
+                        family: Theme.monoFamily
+                        pixelSize: Theme.fs(13)
+                        bold: true
+                    }
+                    // ▶ 的视觉重心偏左，往右挪一点点
+                    x: (parent.width - width) / 2 + (root.playing ? 0 : 1.5)
+                    y: (parent.height - height) / 2
+                }
+
+                MouseArea {
+                    id: playMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (audioEngine.isPlaying()) audioEngine.pause()
+                        else audioEngine.resume()
+                    }
+                }
+            }
+
+            // 下一首
+            Item {
+                width: 26; height: 46
+                opacity: root.hasNext ? 1 : 0.3
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "›"
+                    color: nextMouse.containsMouse && root.hasNext ? Theme.text : Theme.textDim
+                    font {
+                        family: Theme.monoFamily
+                        pixelSize: Theme.fs(22)
+                    }
+                }
+
+                MouseArea {
+                    id: nextMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    enabled: root.hasNext
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.nextClicked()
+                }
+            }
+
+            // 歌词
+            Item {
+                width: lyricText.implicitWidth
+                height: 46
+
+                Text {
+                    id: lyricText
+                    anchors.centerIn: parent
+                    text: "歌词"
+                    color: lyricMouse.containsMouse ? Theme.text : Theme.textMuted
+                    font {
+                        family: Theme.monoFamily
+                        pixelSize: Theme.labelSize
+                        letterSpacing: 1.6
+                    }
+                }
+
+                MouseArea {
+                    id: lyricMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.fullscreenClicked()
+                }
+            }
+        }
+
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: transport.bottom
+            anchors.topMargin: 4
+            text: Theme.formatTime(progressArea.dragging
+                                   ? progressArea.dragValue * audioEngine.duration
+                                   : audioEngine.position)
+                  + " / " + Theme.formatTime(audioEngine.duration)
+            color: progressArea.dragging ? Theme.accentHover : Theme.textMuted
+            font {
+                family: Theme.monoFamily
+                pixelSize: Theme.microSize
+                letterSpacing: 0.8
+            }
+        }
+    }
+
+    // ── 右：音质操作 + 音量 + 队列 ─────────────────────────────
+    Row {
+        id: rightBlock
+        anchors {
+            right: parent.right
+            rightMargin: Math.max(16, Theme.contentSideMargin - 20)
+            verticalCenter: parent.verticalCenter
+            verticalCenterOffset: 2
+        }
+        spacing: 10
+
+        // 加入歌单
+        Item {
+            width: 24; height: 24
+            opacity: root.songCid !== "" ? 1 : 0.3
+
+            Text {
+                anchors.centerIn: parent
+                text: "＋"
+                color: addMouse.containsMouse && root.songCid !== "" ? Theme.accentHover : Theme.textDim
+                font { family: Theme.monoFamily; pixelSize: Theme.fs(14) }
+            }
+
+            MouseArea {
+                id: addMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: root.songCid !== ""
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.openPickerDialog()
+            }
+        }
+
+        // 下载
+        Item {
+            width: 24; height: 24
+            opacity: root.songCid !== "" ? 1 : 0.3
+
+            Text {
+                anchors.centerIn: parent
+                text: root.downloadProgress >= 0
+                      ? Math.round(root.downloadProgress * 100) + "%"
+                      : "↓"
+                color: root.downloadProgress >= 0 ? Theme.accentHover
+                       : (dlMouse.containsMouse && root.songCid !== "" ? Theme.accentHover : Theme.textDim)
+                font {
+                    family: Theme.monoFamily
+                    pixelSize: root.downloadProgress >= 0 ? Theme.fs(7) : Theme.fs(14)
+                }
+            }
+
+            MouseArea {
+                id: dlMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                enabled: root.songCid !== "" && root.downloadProgress < 0
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (root.songCid === "") return
+                    audioCache.downloadToLibrary(root.songCid, root.title,
+                        root.artist, root.songAlbum, root.coverUrl, root.songUrl)
+                }
+            }
+        }
+
+        Item { width: 6; height: 24 }
+
+        // 音量：等宽标签 + 段落条
+        Item {
+            width: volLabel.implicitWidth
+            height: 24
+
+            Text {
+                id: volLabel
+                anchors.centerIn: parent
+                text: "音量"
+                color: Theme.textMuted
+                font {
+                    family: Theme.monoFamily
+                    pixelSize: Theme.microSize
+                    letterSpacing: 1.4
+                }
+            }
+        }
+
+        Item {
+            id: volumeBar
+            width: 74
+            height: 24
+
+            readonly property int segments: 10
+            readonly property real segW: (width - (segments - 1) * 3) / segments
+            property real shownVolume: audioEngine.volume
+
+            Repeater {
+                model: volumeBar.segments
+
+                delegate: Rectangle {
+                    x: index * (volumeBar.segW + 3)
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: volumeBar.segW
+                    height: 10
+                    color: (index + 0.5) / volumeBar.segments <= volumeBar.shownVolume
+                           ? (volumeMouse.containsMouse ? Theme.accentHover : Theme.textDim)
+                           : Theme.border
+                    antialiasing: false
+                    Behavior on color { ColorAnimation { duration: 90 } }
+                }
+            }
+
+            MouseArea {
+                id: volumeMouse
+                anchors.fill: parent
+                anchors.margins: -4
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                function setFrom(x) {
+                    var v = Math.max(0, Math.min(1, x / volumeBar.width))
+                    audioEngine.setVolume(v)
+                }
+                onPressed: (m) => setFrom(m.x)
+                onPositionChanged: (m) => { if (pressed) setFrom(m.x) }
+            }
+        }
+
+        Item { width: 6; height: 24 }
+
+        // 队列
+        Item {
+            width: queueText.implicitWidth
+            height: 24
+
+            Text {
+                id: queueText
+                anchors.centerIn: parent
+                text: "队列"
+                color: queueMouse.containsMouse ? Theme.text : Theme.textDim
+                font {
+                    family: Theme.monoFamily
+                    pixelSize: Theme.labelSize
+                    letterSpacing: 1.6
+                }
+            }
+
+            MouseArea {
+                id: queueMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.playlistClicked()
             }
         }
     }
 
     PlaylistPickerDialog {
         id: pickerDialog
-    }
-
-    function formatTime(ms) {
-        if (!ms || ms < 0) return "0:00"
-        let s = Math.floor(ms / 1000)
-        let m = Math.floor(s / 60); s = s % 60
-        return m + ":" + s.toString().padStart(2, "0")
     }
 }

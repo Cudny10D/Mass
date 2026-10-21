@@ -15,6 +15,17 @@ Item {
     property bool showingGrid: mode === "grid"
     property bool showingDetail: mode === "detail"
 
+    // Hero 动画状态
+    property bool heroActive: false
+
+    // 轻量 toast
+    property string toastMsg: ""
+    function showToast(msg) {
+        root.toastMsg = msg
+        toast.opacity = 1
+        toastTimer.restart()
+    }
+
     ListModel { id: songsModel }
 
     function coverSource(cover) {
@@ -67,53 +78,107 @@ Item {
             anchors.fill: parent
             spacing: 0
 
+            // ============================================================
             // 顶部栏
+            // ============================================================
+            // ============================================================
+            // 索引条 / 返回
+            // ============================================================
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 56
+                Layout.preferredHeight: 40
                 clip: true
 
                 RowLayout {
-                    anchors { fill: parent; leftMargin: 96; rightMargin: 32 }
+                    anchors.fill: parent
+                    anchors.leftMargin: Theme.contentSideMargin
+                    anchors.rightMargin: Theme.contentSideMargin
                     spacing: 12
                     opacity: root.showingGrid ? 1 : 0
-                    x: root.showingGrid ? 0 : -40
                     visible: opacity > 0.01
-                    Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-                    Behavior on x { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
                     Text {
-                        text: "我的歌单"
-                        color: Theme.text
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(18); bold: true }
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        text: playlistManager.playlists.length + " 个"
+                        text: "MY MUSIC / 我的歌单"
                         color: Theme.textDim
-                        font { family: Theme.fontFamily; pixelSize: Theme.fs(12) }
+                        font {
+                            family: Theme.monoFamily
+                            pixelSize: Theme.labelSize
+                            letterSpacing: 1.8
+                        }
                     }
 
                     Rectangle {
-                        Layout.preferredWidth: 100
-                        Layout.preferredHeight: 32
-                        radius: 16
+                        Layout.fillWidth: true
+                        height: 1
+                        color: Theme.border
+                        opacity: 0.55
+                    }
+
+                    Text {
+                        text: playlistManager.playlists.length + " 个歌单"
+                        color: Theme.textMuted
+                        font {
+                            family: Theme.fontFamily
+                            pixelSize: Theme.fs(11.5)
+                            letterSpacing: 0.6
+                        }
+                    }
+
+                    // 导入歌单
+                    Item {
+                        Layout.preferredWidth: 60
+                        Layout.preferredHeight: 24
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "导入歌单"
+                            color: importPlBtn.containsMouse ? Theme.accentHover : Theme.textDim
+                            font { family: Theme.fontFamily; pixelSize: Theme.fs(11.5) }
+                        }
+
+                        MouseArea {
+                            id: importPlBtn
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                let path = appSettings.pickOpenFile(
+                                    "选择歌单 JSON", "Mass 歌单 (*.json)")
+                                if (path === "") return
+                                let n = playlistManager.importPlaylist(path)
+                                if (n > 0) root.showToast("歌单已导入")
+                                else root.showToast("导入失败：文件无效")
+                            }
+                        }
+                    }
+
+                    // 新建歌单
+                    Rectangle {
+                        Layout.preferredWidth: newRow.implicitWidth + 28
+                        Layout.preferredHeight: 28
                         color: newBtn.containsMouse ? Theme.accentHover : Theme.accent
                         Behavior on color { ColorAnimation { duration: Theme.animFast } }
 
-                        RowLayout {
+                        Row {
+                            id: newRow
                             anchors.centerIn: parent
                             spacing: 6
                             Text {
-                                text: "+"
-                                color: Theme.darkMode ? "#000000" : "#ffffff"
-                                font { family: Theme.fontFamily; pixelSize: Theme.fs(16); bold: true }
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "＋"
+                                color: Theme.ink
+                                font { family: Theme.monoFamily; pixelSize: Theme.fs(10) }
                             }
                             Text {
+                                anchors.verticalCenter: parent.verticalCenter
                                 text: "新建歌单"
-                                color: Theme.darkMode ? "#000000" : "#ffffff"
-                                font { family: Theme.fontFamily; pixelSize: Theme.fs(12); bold: true }
+                                color: Theme.ink
+                                font {
+                                    family: Theme.fontFamily
+                                    pixelSize: Theme.fs(11.5)
+                                    weight: Font.DemiBold
+                                }
                             }
                         }
 
@@ -121,88 +186,71 @@ Item {
                             id: newBtn
                             anchors.fill: parent
                             hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: newDialog.open()
                         }
                     }
                 }
 
-                Rectangle {
-                    anchors.centerIn: parent
-                    height: 32
-                    width: Math.max(100, Math.min(parent.width - 80, backRow.implicitWidth + 32))
-                    radius: 16
+                // 详情态：返回
+                Item {
+                    id: backRow
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: Theme.contentSideMargin
+                    width: backContent.width
+                    height: backContent.height
                     opacity: root.showingDetail ? 1 : 0
-                    x: root.showingDetail ? 0 : 40
                     visible: opacity > 0.01
-                    Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-                    Behavior on x { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+                    Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
 
-                    color: backArea.containsMouse
-                           ? Theme.accent
-                           : (Theme.darkMode ? "#1effffff" : "#0a000000")
-                    Behavior on color { ColorAnimation { duration: Theme.animFast } }
-
-                    Rectangle {
-                        anchors { top: parent.top; left: parent.left; right: parent.right }
-                        anchors.margins: 1
-                        height: parent.height / 2
-                        radius: parent.radius
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#30ffffff" }
-                            GradientStop { position: 1.0; color: "#00ffffff" }
-                        }
-                        opacity: backArea.containsMouse
-                                 ? (Theme.darkMode ? 0.5 : 0.15)
-                                 : (Theme.darkMode ? 0.4 : 0.1)
-                    }
-
-                    RowLayout {
-                        id: backRow
-                        anchors.centerIn: parent
-                        spacing: 6
+                    Row {
+                        id: backContent
+                        spacing: 8
 
                         Text {
                             text: "←"
-                            color: backArea.containsMouse
-                                   ? (Theme.darkMode ? "#000000" : "#ffffff")
-                                   : Theme.text
-                            font { family: Theme.fontFamily; pixelSize: Theme.fs(14); bold: true }
-                            Behavior on color { ColorAnimation { duration: Theme.animFast } }
+                            color: backArea.containsMouse ? Theme.accentHover : Theme.textDim
+                            font { family: Theme.monoFamily; pixelSize: Theme.fs(13) }
                         }
+                        Text {
+                            text: "返回我的歌单"
+                            color: backArea.containsMouse ? Theme.accentHover : Theme.textDim
+                            font { family: Theme.fontFamily; pixelSize: Theme.fs(11.5) }
+                        }
+                        Item { width: 4; height: 1 }
 
                         Text {
-                            Layout.maximumWidth: 240
-                            text: root.currentName || "返回"
-                            color: backArea.containsMouse
-                                   ? (Theme.darkMode ? "#000000" : "#ffffff")
-                                   : Theme.text
+                            text: "ESC"
+                            color: Theme.textMuted
                             font {
-                                family: Theme.fontFamily
-                                pixelSize: Theme.fs(12)
-                                bold: backArea.containsMouse
+                                family: Theme.monoFamily
+                                pixelSize: Theme.microSize
+                                letterSpacing: 1.2
                             }
-                            elide: Text.ElideRight
-                            Behavior on color { ColorAnimation { duration: Theme.animFast } }
                         }
                     }
 
+                    // 命中区放在 Row 外面：Row 的子项不能用 fill 锚点
                     MouseArea {
                         id: backArea
                         anchors.fill: parent
                         hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
                         onClicked: root.exitDetail()
                     }
                 }
             }
 
+            // ============================================================
+            // 内容
+            // ============================================================
             Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
 
-                // ============================================================
                 // Grid 视图
-                // ============================================================
                 Item {
                     anchors.fill: parent
                     opacity: root.showingGrid ? 1 : 0
@@ -219,42 +267,43 @@ Item {
 
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: "♫"; color: Theme.textMuted
-                            font.pixelSize: 56; opacity: 0.4
-                        }
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: "还没有歌单"
-                            color: Theme.textDim
-                            font { family: Theme.fontFamily; pixelSize: Theme.fs(14) }
-                        }
-                        Text {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            text: "点击右上角「+ 新建歌单」开始"
+                            text: "NO PLAYLIST"
                             color: Theme.textMuted
-                            font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
+                            font {
+                                family: Theme.monoFamily
+                                pixelSize: Theme.fs(13)
+                                letterSpacing: 3
+                            }
+                        }
+                        Text {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            text: "点右上角「新建歌单」开始，或「导入歌单」读取分享文件"
+                            color: Theme.textMuted
+                            font { family: Theme.fontFamily; pixelSize: Theme.fs(11.5) }
                         }
                     }
 
                     GridView {
                         id: grid
                         anchors.fill: parent
-                        anchors.leftMargin: 96
-                        anchors.rightMargin: 32
+                        // 留白由窗口宽度驱动（见 Theme.contentSideMargin）
+                        anchors.leftMargin: Theme.contentSideMargin
+                        anchors.rightMargin: Theme.contentSideMargin
                         anchors.topMargin: 8
-                        anchors.bottomMargin: 0
+                        anchors.bottomMargin: 28
                         clip: true
                         visible: playlistManager.playlists.length > 0
 
-                        property int columns: 5
-                        property int gap: 24
+                        // 列数自适应窗口宽度（详见 Theme.gridMetrics）
+                        readonly property var metrics: Theme.gridMetrics
+                        property int columns: metrics.columns
+                        property int gap: Theme.gridGap
 
-                        cellWidth: width / columns
-                        cellHeight: cellWidth + 64
+                        cellWidth: metrics.cellWidth
+                        cellHeight: Math.max(1, metrics.cellWidth + 64)
 
                         model: playlistManager.playlists
 
-                        // ★ 歌单本身的增删可以保留动画（不是批量操作）
                         add: Transition {
                             NumberAnimation {
                                 property: "opacity"
@@ -300,12 +349,13 @@ Item {
                                     width: parent.width
                                     height: parent.width
 
-                                    property real cornerRadius: 10
+                                    property real cornerRadius: 0
 
                                     Rectangle {
                                         anchors.fill: parent
                                         radius: coverItem.cornerRadius
                                         color: Theme.panelAlt
+                                        antialiasing: true
                                     }
 
                                     Image {
@@ -315,10 +365,13 @@ Item {
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true
                                         cache: true
-                                        sourceSize.width: 400
-                                        sourceSize.height: 400
+                                        sourceSize.width: 512
+                                        sourceSize.height: 512
+                                        smooth: true
+                                        mipmap: true
                                         visible: false
                                         layer.enabled: true
+                                        layer.smooth: true
                                     }
 
                                     Item {
@@ -326,6 +379,8 @@ Item {
                                         anchors.fill: parent
                                         visible: false
                                         layer.enabled: true
+                                        layer.smooth: true
+
                                         Rectangle {
                                             anchors.fill: parent
                                             radius: coverItem.cornerRadius
@@ -341,6 +396,7 @@ Item {
                                         visible: coverImg.status === Image.Ready
                                         maskEnabled: true
                                         maskSource: coverMaskSource
+                                        smooth: true
                                     }
 
                                     Text {
@@ -366,12 +422,14 @@ Item {
                                         radius: coverItem.cornerRadius
                                         color: "#000000"
                                         opacity: isHover ? 0.35 : 0
+                                        antialiasing: true
                                         Behavior on opacity { NumberAnimation { duration: 150 } }
 
                                         Rectangle {
                                             anchors.centerIn: parent
-                                            width: 36; height: 36; radius: 18
+                                            width: 36; height: 36; radius: 0
                                             color: Theme.accent
+                                            antialiasing: true
                                             scale: isHover ? 1.0 : 0.7
                                             opacity: isHover ? 1 : 0
                                             Behavior on scale { NumberAnimation { duration: 220 } }
@@ -380,7 +438,7 @@ Item {
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: "→"
-                                                color: Theme.darkMode ? "#000000" : "#ffffff"
+                                                color: Theme.ink
                                                 font.pixelSize: 16
                                                 font.bold: true
                                             }
@@ -399,7 +457,7 @@ Item {
 
                                 Text {
                                     width: parent.width
-                                    text: (modelData.songs ? modelData.songs.length : 0) + " 首"
+                                    text: (modelData.songs ? modelData.songs.length : 0) + " TRACKS"
                                     color: Theme.textDim
                                     font { family: Theme.fontFamily; pixelSize: Theme.fs(11) }
                                 }
@@ -409,17 +467,35 @@ Item {
                                 id: itemArea
                                 anchors.fill: parent
                                 hoverEnabled: true
+
                                 onClicked: {
+                                    let src = coverItem
+                                    let p = src.mapToItem(root, 0, 0)
+                                    hero.fromRect = Qt.rect(p.x, p.y, src.width, src.height)
+                                    hero.imageUrl = root.coverSource(modelData.cover)
+
                                     root.enterPlaylist(modelData.id,
                                                        modelData.name,
                                                        modelData.cover || "")
+
+                                    Qt.callLater(function() {
+                                        if (!bigCoverContainer) return
+                                        let p2 = bigCoverContainer.mapToItem(root, 0, 0)
+                                        hero.toRect = Qt.rect(p2.x, p2.y,
+                                                              bigCoverContainer.width,
+                                                              bigCoverContainer.height)
+                                        root.heroActive = true
+                                        hero.start(root.coverSource(modelData.cover),
+                                                   hero.fromRect, hero.toRect,
+                                                   coverItem.cornerRadius, 12)
+                                    })
                                 }
                             }
                         }
 
                         ScrollBar.vertical: ScrollBar {
-                            active: true; policy: ScrollBar.AsNeeded; width: 6
-                            contentItem: Rectangle { radius: 3; color: Theme.textMuted; opacity: 0.4 }
+                            policy: ScrollBar.AsNeeded; width: 3
+                            contentItem: Rectangle { radius: 0; color: Theme.textMuted; opacity: 0.45 }
                         }
                     }
                 }
@@ -442,21 +518,26 @@ Item {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Layout.leftMargin: 96
-                            Layout.rightMargin: 32
-                            Layout.topMargin: 8
+                            Layout.leftMargin: Theme.contentSideMargin
+                            Layout.rightMargin: Theme.contentSideMargin
+                            Layout.topMargin: 26
                             spacing: 24
 
                             Item {
+                                id: bigCoverContainer
                                 Layout.preferredWidth: 140
                                 Layout.preferredHeight: 140
 
-                                property real cornerRadius: 12
+                                property real cornerRadius: 0
+
+                                opacity: root.heroActive ? 0 : 1
+                                Behavior on opacity { NumberAnimation { duration: 140 } }
 
                                 Rectangle {
                                     anchors.fill: parent
                                     radius: parent.cornerRadius
                                     color: Theme.panelAlt
+                                    antialiasing: true
                                 }
 
                                 Image {
@@ -466,10 +547,13 @@ Item {
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
                                     cache: true
-                                    sourceSize.width: 280
-                                    sourceSize.height: 280
+                                    sourceSize.width: 1024
+                                    sourceSize.height: 1024
+                                    smooth: true
+                                    mipmap: true
                                     visible: false
                                     layer.enabled: true
+                                    layer.smooth: true
                                 }
 
                                 Item {
@@ -477,6 +561,8 @@ Item {
                                     anchors.fill: parent
                                     visible: false
                                     layer.enabled: true
+                                    layer.smooth: true
+
                                     Rectangle {
                                         anchors.fill: parent
                                         radius: parent.parent.cornerRadius
@@ -492,6 +578,7 @@ Item {
                                     visible: bigCoverImg.status === Image.Ready
                                     maskEnabled: true
                                     maskSource: bigMaskSource
+                                    smooth: true
                                 }
 
                                 Text {
@@ -525,12 +612,14 @@ Item {
                                 RowLayout {
                                     spacing: 10
 
+                                    // 播放全部
                                     Rectangle {
                                         Layout.preferredWidth: 110
                                         Layout.preferredHeight: 34
-                                        radius: 17
+                                        radius: 0
                                         color: playAllBtn.containsMouse ? Theme.accentHover : Theme.accent
                                         visible: songsModel.count > 0
+                                        antialiasing: true
                                         Behavior on color { ColorAnimation { duration: Theme.animFast } }
 
                                         RowLayout {
@@ -538,12 +627,12 @@ Item {
                                             spacing: 6
                                             Text {
                                                 text: "▶"
-                                                color: Theme.darkMode ? "#000000" : "#ffffff"
+                                                color: Theme.ink
                                                 font.pixelSize: Theme.fs(12)
                                             }
                                             Text {
                                                 text: "播放全部"
-                                                color: Theme.darkMode ? "#000000" : "#ffffff"
+                                                color: Theme.ink
                                                 font { family: Theme.fontFamily; pixelSize: Theme.fs(12); bold: true }
                                             }
                                         }
@@ -566,13 +655,53 @@ Item {
                                         }
                                     }
 
+                                    // ★ 分享歌单
                                     Rectangle {
                                         Layout.preferredWidth: 100
                                         Layout.preferredHeight: 34
-                                        radius: 17
+                                        radius: 0
+                                        color: shareBtn.containsMouse ? Theme.hover : "transparent"
+                                        border.color: Theme.border
+                                        border.width: 1
+                                        antialiasing: true
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "分享歌单"
+                                            color: shareBtn.containsMouse ? Theme.accentHover : Theme.text
+                                            font { family: Theme.fontFamily; pixelSize: Theme.fs(12) }
+                                        }
+
+                                        MouseArea {
+                                            id: shareBtn
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: {
+                                                let safeName = (root.currentName || "playlist")
+                                                    .replace(/[\\/:*?"<>|]/g, "_")
+                                                let fname = "playlist-" + safeName + ".json"
+                                                let path = appSettings.pickSaveFile(
+                                                    "分享歌单", fname)
+                                                if (path === "") return
+                                                if (playlistManager.exportPlaylist(
+                                                        root.currentId, path)) {
+                                                    root.showToast("已导出到：" + path)
+                                                } else {
+                                                    root.showToast("导出失败")
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // 编辑封面
+                                    Rectangle {
+                                        Layout.preferredWidth: 100
+                                        Layout.preferredHeight: 34
+                                        radius: 0
                                         color: coverBtn.containsMouse ? Theme.hover : "transparent"
                                         border.color: Theme.border
                                         border.width: 1
+                                        antialiasing: true
 
                                         Text {
                                             anchors.centerIn: parent
@@ -592,19 +721,21 @@ Item {
                                         }
                                     }
 
+                                    // 删除
                                     Rectangle {
                                         Layout.preferredWidth: 100
                                         Layout.preferredHeight: 34
-                                        radius: 17
+                                        radius: 0
                                         color: delBtn.containsMouse ? "#33e81123" : "transparent"
                                         border.color: delBtn.containsMouse ? "transparent" : Theme.border
                                         border.width: delBtn.containsMouse ? 0 : 1
+                                        antialiasing: true
                                         Behavior on color { ColorAnimation { duration: Theme.animFast } }
 
                                         Text {
                                             anchors.centerIn: parent
                                             text: "删除歌单"
-                                            color: "#e81123"
+                                            color: delBtn.containsMouse ? "#e81123" : Theme.textDim
                                             font { family: Theme.fontFamily; pixelSize: Theme.fs(12); bold: delBtn.containsMouse }
                                         }
 
@@ -622,8 +753,8 @@ Item {
                         Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.leftMargin: 96
-                            Layout.rightMargin: 32
+                            Layout.leftMargin: Theme.contentSideMargin
+                            Layout.rightMargin: Theme.contentSideMargin
                             Layout.bottomMargin: 0
                             clip: true
 
@@ -658,17 +789,12 @@ Item {
                                 visible: songsModel.count > 0
                                 model: songsModel
 
-                                // ★ 没有 add / remove / displaced Transition
-                                //   模型变化时瞬时切换，不会重合
-
                                 delegate: Item {
                                     id: songRow
                                     width: songsList.width
                                     height: 64
 
-                                    HoverHandler {
-                                        id: rowHover
-                                    }
+                                    HoverHandler { id: rowHover }
 
                                     property bool isHover: rowHover.hovered
 
@@ -676,6 +802,7 @@ Item {
                                         anchors.fill: parent
                                         radius: Theme.radius
                                         color: songRow.isHover ? Theme.hover : "transparent"
+                                        antialiasing: true
                                         Behavior on color { ColorAnimation { duration: 120 } }
                                         z: -1
                                     }
@@ -713,9 +840,10 @@ Item {
                                         Rectangle {
                                             Layout.preferredWidth: 44
                                             Layout.preferredHeight: 44
-                                            radius: 8
+                                            radius: 0
                                             color: Theme.panelAlt
                                             clip: true
+                                            antialiasing: true
 
                                             Image {
                                                 anchors.fill: parent
@@ -723,6 +851,10 @@ Item {
                                                 fillMode: Image.PreserveAspectCrop
                                                 asynchronous: true
                                                 cache: true
+                                                sourceSize.width: 128
+                                                sourceSize.height: 128
+                                                smooth: true
+                                                mipmap: true
                                                 visible: status === Image.Ready
                                             }
                                             Text {
@@ -757,10 +889,11 @@ Item {
                                             id: removeButton
                                             Layout.preferredWidth: 30
                                             Layout.preferredHeight: 30
-                                            radius: 15
+                                            radius: 0
                                             color: removeBtnArea.containsMouse ? "#e81123" : "transparent"
                                             border.color: removeBtnArea.containsMouse ? "transparent" : Theme.border
                                             border.width: removeBtnArea.containsMouse ? 0 : 1
+                                            antialiasing: true
                                             opacity: songRow.isHover ? 1 : 0
                                             Behavior on opacity { NumberAnimation { duration: 120 } }
                                             Behavior on color { ColorAnimation { duration: 150 } }
@@ -794,48 +927,12 @@ Item {
                                 }
 
                                 ScrollBar.vertical: ScrollBar {
-                                    active: true; policy: ScrollBar.AsNeeded; width: 6
-                                    contentItem: Rectangle { radius: 3; color: Theme.textMuted; opacity: 0.4 }
+                                    policy: ScrollBar.AsNeeded; width: 3
+                                    contentItem: Rectangle { radius: 0; color: Theme.textMuted; opacity: 0.45 }
                                 }
                             }
                         }
                     }
-                }
-
-                Rectangle {
-                    anchors {
-                        top: parent.top
-                        left: parent.left
-                        right: parent.right
-                    }
-                    height: 80
-                    topLeftRadius: Theme.windowFullscreen ? Theme.radiusWindow : 0
-                    topRightRadius: Theme.windowFullscreen ? Theme.radiusWindow : 0
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.windowTop(1.0) }
-                        GradientStop { position: 0.5; color: Theme.windowTop(0.65) }
-                        GradientStop { position: 1.0; color: Theme.windowTop(0.0) }
-                    }
-                    z: 100
-                    enabled: false
-                }
-
-                Rectangle {
-                    anchors {
-                        bottom: parent.bottom
-                        left: parent.left
-                        right: parent.right
-                    }
-                    height: 100
-                    bottomLeftRadius: Theme.radiusWindow
-                    bottomRightRadius: Theme.radiusWindow
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Theme.windowBottom(0.0) }
-                        GradientStop { position: 0.5; color: Theme.windowBottom(0.65) }
-                        GradientStop { position: 1.0; color: Theme.windowBottom(1.0) }
-                    }
-                    z: 100
-                    enabled: false
                 }
             }
         }
@@ -857,9 +954,7 @@ Item {
             opacity = 1
             newInput.forceActiveFocus()
         }
-        function close() {
-            opacity = 0
-        }
+        function close() { opacity = 0 }
 
         Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
@@ -881,6 +976,7 @@ Item {
             color: Theme.panel
             border.color: Theme.border
             border.width: 1
+            antialiasing: true
 
             scale: newDialog.opacity > 0.5 ? 1.0 : 0.85
             Behavior on scale {
@@ -907,6 +1003,7 @@ Item {
                     radius: Theme.radius
                     border.color: newInput.activeFocus ? Theme.accent : Theme.border
                     border.width: 1
+                    antialiasing: true
 
                     TextInput {
                         id: newInput
@@ -940,10 +1037,11 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 80
                         Layout.preferredHeight: 32
-                        radius: 16
+                        radius: 0
                         color: cancelBtn.containsMouse ? Theme.hover : "transparent"
                         border.color: Theme.border
                         border.width: 1
+                        antialiasing: true
 
                         Text {
                             anchors.centerIn: parent
@@ -963,13 +1061,14 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 80
                         Layout.preferredHeight: 32
-                        radius: 16
+                        radius: 0
                         color: okBtn.containsMouse ? Theme.accentHover : Theme.accent
+                        antialiasing: true
 
                         Text {
                             anchors.centerIn: parent
                             text: "创建"
-                            color: Theme.darkMode ? "#000000" : "#ffffff"
+                            color: Theme.ink
                             font { family: Theme.fontFamily; pixelSize: Theme.fs(12); bold: true }
                         }
 
@@ -1007,9 +1106,7 @@ Item {
             coverText = root.currentCover
             opacity = 1
         }
-        function close() {
-            opacity = 0
-        }
+        function close() { opacity = 0 }
 
         Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
@@ -1032,6 +1129,7 @@ Item {
             border.color: Theme.border
             border.width: 1
             clip: true
+            antialiasing: true
 
             scale: coverDialog.opacity > 0.5 ? 1.0 : 0.85
             Behavior on scale {
@@ -1059,6 +1157,7 @@ Item {
                     border.color: coverInput.activeFocus ? Theme.accent : Theme.border
                     border.width: 1
                     clip: true
+                    antialiasing: true
 
                     Text {
                         anchors {
@@ -1119,10 +1218,11 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 80
                         Layout.preferredHeight: 32
-                        radius: 16
+                        radius: 0
                         color: cancelCoverBtn.containsMouse ? Theme.hover : "transparent"
                         border.color: Theme.border
                         border.width: 1
+                        antialiasing: true
 
                         Text {
                             anchors.centerIn: parent
@@ -1142,13 +1242,14 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 80
                         Layout.preferredHeight: 32
-                        radius: 16
+                        radius: 0
                         color: saveCoverBtn.containsMouse ? Theme.accentHover : Theme.accent
+                        antialiasing: true
 
                         Text {
                             anchors.centerIn: parent
                             text: "保存"
-                            color: Theme.darkMode ? "#000000" : "#ffffff"
+                            color: Theme.ink
                             font { family: Theme.fontFamily; pixelSize: Theme.fs(12); bold: true }
                         }
 
@@ -1203,6 +1304,7 @@ Item {
             color: Theme.panel
             border.color: Theme.border
             border.width: 1
+            antialiasing: true
 
             scale: confirmDeleteDialog.opacity > 0.5 ? 1.0 : 0.85
             Behavior on scale {
@@ -1237,10 +1339,11 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 80
                         Layout.preferredHeight: 32
-                        radius: 16
+                        radius: 0
                         color: cancelDelBtn.containsMouse ? Theme.hover : "transparent"
                         border.color: Theme.border
                         border.width: 1
+                        antialiasing: true
 
                         Text {
                             anchors.centerIn: parent
@@ -1260,8 +1363,9 @@ Item {
                     Rectangle {
                         Layout.preferredWidth: 80
                         Layout.preferredHeight: 32
-                        radius: 16
+                        radius: 0
                         color: confirmDelBtn.containsMouse ? "#cc0e1a" : "#e81123"
+                        antialiasing: true
 
                         Text {
                             anchors.centerIn: parent
@@ -1283,6 +1387,49 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // ============================================================
+    // Hero 覆盖层
+    // ============================================================
+    HeroOverlay {
+        id: hero
+        onFinished: root.heroActive = false
+    }
+
+    // ============================================================
+    // Toast
+    // ============================================================
+    Rectangle {
+        id: toast
+        parent: Overlay.overlay
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 80
+        width: toastText.implicitWidth + 40
+        height: 40
+        radius: 0
+        color: Theme.glassBgDeep
+        opacity: 0
+        visible: opacity > 0.01
+        z: 3000
+        antialiasing: true
+
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+
+        Text {
+            id: toastText
+            anchors.centerIn: parent
+            text: root.toastMsg
+            color: Theme.textBright
+            font { family: Theme.fontFamily; pixelSize: Theme.fs(12) }
+        }
+
+        Timer {
+            id: toastTimer
+            interval: 2500
+            onTriggered: toast.opacity = 0
         }
     }
 

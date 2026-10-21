@@ -1,4 +1,5 @@
 #include "CoverCache.h"
+#include "NetworkManager.h"
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QNetworkDiskCache>
@@ -9,8 +10,8 @@ static const char *kUserAgent =
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/120.0.0.0 Safari/537.36";
 
-CoverCache::CoverCache(QNetworkAccessManager *sharedManager, QObject *parent)
-    : QObject(parent), m_manager(sharedManager) {}
+CoverCache::CoverCache(NetworkManager *network, QObject *parent)
+    : QObject(parent), m_network(network) {}
 
 // ============================================================
 // 批量预取
@@ -30,19 +31,13 @@ void CoverCache::prefetchAll(const QStringList &urls) {
     processQueue();
 }
 
-void CoverCache::prefetch(const QString &url) {
-    if (url.isEmpty()) return;
-    enqueue(url);
-    processQueue();
-}
-
 // ============================================================
 // 入队（去重）
 // ============================================================
 void CoverCache::enqueue(const QString &url) {
     if (m_pending.contains(url)) return;
     m_pending.insert(url);
-    m_queue.enqueue({url});
+    m_queue.enqueue(url);
 }
 
 // ============================================================
@@ -50,9 +45,8 @@ void CoverCache::enqueue(const QString &url) {
 // ============================================================
 void CoverCache::processQueue() {
     while (m_active < MAX_CONCURRENT && !m_queue.isEmpty()) {
-        PendingItem item = m_queue.dequeue();
         m_active++;
-        startDownload(item.url);
+        startDownload(m_queue.dequeue());
     }
 }
 
@@ -60,6 +54,13 @@ void CoverCache::processQueue() {
 // 实际下载
 // ============================================================
 void CoverCache::startDownload(const QString &url) {
+    // 走 QML 的 NAM，写进图片缓存（Image 读的也是它）
+    QNetworkAccessManager *nam = m_network ? m_network->coverManager() : nullptr;
+    if (!nam) {
+        finishOne(url);   // 避免卡住并发槽
+        return;
+    }
+
     QNetworkRequest req{QUrl(url)};
     req.setHeader(QNetworkRequest::UserAgentHeader, kUserAgent);
     req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
@@ -67,7 +68,7 @@ void CoverCache::startDownload(const QString &url) {
                      QNetworkRequest::PreferCache);
     req.setAttribute(QNetworkRequest::CacheSaveControlAttribute, true);
 
-    auto *reply = m_manager->get(req);
+    auto *reply = nam->get(req);
 
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, url]() {

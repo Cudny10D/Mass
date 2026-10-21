@@ -13,10 +13,6 @@ public:
     // 探测音频元数据（通过 Range 请求，只读头部）
     Q_INVOKABLE void probe(const QString &cid, const QString &url);
 
-    Q_INVOKABLE bool hasResult(const QString &cid) const;
-    Q_INVOKABLE qint64 getDurationMs(const QString &cid) const;
-    Q_INVOKABLE int getSampleRate(const QString &cid) const;
-    Q_INVOKABLE int getChannels(const QString &cid) const;
     Q_INVOKABLE void clearCache();
 
 signals:

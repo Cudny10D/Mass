@@ -10,6 +10,7 @@
 #include <QUrl>
 #include <QtEndian>
 #include <cstring>
+#include <cmath>
 
 static const char *kUserAgent =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -37,32 +38,39 @@ static QByteArray convert24toInt32(const QByteArray &in) {
     }
     return out;
 }
+
 static QByteArray convert24toFloat(const QByteArray &in) {
     int samples = in.size() / 3;
     QByteArray out; out.resize(samples * 4);
     const uchar *p = reinterpret_cast<const uchar *>(in.constData());
     float *o = reinterpret_cast<float *>(out.data());
     for (int i = 0; i < samples; ++i) {
-        int32_t s = (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16));
+        int32_t s = (int32_t)((uint32_t)p[0]
+                            | ((uint32_t)p[1] << 8)
+                            | ((uint32_t)p[2] << 16));
         if (s & 0x800000) s |= 0xFF000000;
         *o = s / 8388608.0f;
         p += 3; ++o;
     }
     return out;
 }
+
 static QByteArray convert24toInt16(const QByteArray &in) {
     int samples = in.size() / 3;
     QByteArray out; out.resize(samples * 2);
     const uchar *p = reinterpret_cast<const uchar *>(in.constData());
     int16_t *o = reinterpret_cast<int16_t *>(out.data());
     for (int i = 0; i < samples; ++i) {
-        int32_t s = (int32_t)((uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16));
+        int32_t s = (int32_t)((uint32_t)p[0]
+                            | ((uint32_t)p[1] << 8)
+                            | ((uint32_t)p[2] << 16));
         if (s & 0x800000) s |= 0xFF000000;
         o[i] = (int16_t)(s >> 8);
         p += 3;
     }
     return out;
 }
+
 static QByteArray convertFloatToInt32(const QByteArray &in) {
     int samples = in.size() / 4;
     QByteArray out; out.resize(samples * 4);
@@ -76,6 +84,7 @@ static QByteArray convertFloatToInt32(const QByteArray &in) {
     }
     return out;
 }
+
 static QByteArray convertFloatToInt16(const QByteArray &in) {
     int samples = in.size() / 4;
     QByteArray out; out.resize(samples * 2);
@@ -89,6 +98,7 @@ static QByteArray convertFloatToInt16(const QByteArray &in) {
     }
     return out;
 }
+
 static QByteArray convertInt32ToFloat(const QByteArray &in) {
     int samples = in.size() / 4;
     QByteArray out; out.resize(samples * 4);
@@ -97,6 +107,7 @@ static QByteArray convertInt32ToFloat(const QByteArray &in) {
     for (int i = 0; i < samples; ++i) o[i] = p[i] / 2147483648.0f;
     return out;
 }
+
 static QByteArray convertInt16ToFloat(const QByteArray &in) {
     int samples = in.size() / 2;
     QByteArray out; out.resize(samples * 4);
@@ -105,6 +116,7 @@ static QByteArray convertInt16ToFloat(const QByteArray &in) {
     for (int i = 0; i < samples; ++i) o[i] = p[i] / 32768.0f;
     return out;
 }
+
 static QByteArray convertInt16ToInt32(const QByteArray &in) {
     int samples = in.size() / 2;
     QByteArray out; out.resize(samples * 4);
@@ -120,23 +132,10 @@ StreamAudioPlayer::StreamAudioPlayer(QObject *parent)
     m_positionTimer.setInterval(30);
     connect(&m_positionTimer, &QTimer::timeout,
             this, &StreamAudioPlayer::updatePosition);
+    m_clock.start();
 }
 
 StreamAudioPlayer::~StreamAudioPlayer() { stop(); }
-
-// ============================================================
-// abort 所有在飞请求
-// ============================================================
-void StreamAudioPlayer::abortAllInFlight() {
-    for (auto *r : m_inFlight) {
-        if (!r) continue;
-        r->disconnect(this);
-        r->abort();
-        r->deleteLater();
-    }
-    m_inFlight.clear();
-    m_orderedChunks.clear();
-}
 
 // ============================================================
 // start
@@ -156,7 +155,13 @@ bool StreamAudioPlayer::start(const QString &url) {
         });
     }
 
-    abortAllInFlight();
+    if (m_activeReply) {
+        QNetworkReply *r = m_activeReply;
+        m_activeReply = nullptr;
+        r->disconnect(this);
+        r->abort();
+        r->deleteLater();
+    }
 
     m_positionTimer.stop();
     m_active = false;
@@ -171,20 +176,18 @@ bool StreamAudioPlayer::start(const QString &url) {
     m_buffering    = true;
     m_bytesWritten = 0;
     m_nextFetchPos = 0;
-    m_nextWritePos = 0;
     m_durationMs   = 0;
     m_seekBaseMs   = 0;
     m_info         = WavInfo();
     m_rawBuffer.clear();
     m_pcmBuffer.clear();
     m_pendingData.clear();
-    m_orderedChunks.clear();
 
     emit bufferingChanged(true);
     emit durationChanged(0);
     emit positionChanged(0);
 
-    qDebug() << "[Stream] start (gen" << m_generation << "):" << url;
+    qDebug() << "[Stream] start:" << url;
     fetchHeader(m_generation);
     return true;
 }
@@ -196,7 +199,13 @@ void StreamAudioPlayer::stop() {
     m_paused = false;
     m_buffering = false;
 
-    abortAllInFlight();
+    if (m_activeReply) {
+        QNetworkReply *r = m_activeReply;
+        m_activeReply = nullptr;
+        r->disconnect(this);
+        r->abort();
+        r->deleteLater();
+    }
 
     if (m_sink) {
         QAudioSink *s = m_sink;
@@ -212,12 +221,10 @@ void StreamAudioPlayer::stop() {
     m_positionTimer.stop();
     m_bytesWritten = 0;
     m_nextFetchPos = 0;
-    m_nextWritePos = 0;
     m_seekBaseMs = 0;
     m_rawBuffer.clear();
     m_pcmBuffer.clear();
     m_pendingData.clear();
-    m_orderedChunks.clear();
 }
 
 void StreamAudioPlayer::pause() {
@@ -265,12 +272,18 @@ void StreamAudioPlayer::seek(qint64 ms) {
     qDebug() << "[Stream] seek to" << ms << "ms";
 
     m_generation++;
-    abortAllInFlight();
+
+    if (m_activeReply) {
+        QNetworkReply *r = m_activeReply;
+        m_activeReply = nullptr;
+        r->disconnect(this);
+        r->abort();
+        r->deleteLater();
+    }
 
     m_rawBuffer.clear();
     m_pcmBuffer.clear();
     m_pendingData.clear();
-    m_orderedChunks.clear();
     m_bytesWritten = 0;
     m_buffering = true;
     m_playing = false;
@@ -296,7 +309,6 @@ void StreamAudioPlayer::seek(qint64 ms) {
     }
 
     m_nextFetchPos = newFetchPos;
-    m_nextWritePos = newFetchPos;
     m_positionTimer.start();
 
     emit bufferingChanged(true);
@@ -315,7 +327,7 @@ qint64 StreamAudioPlayer::duration() const {
 }
 
 // ============================================================
-// fetchHeader
+// fetchHeader —— 只读 4 KB
 // ============================================================
 void StreamAudioPlayer::fetchHeader(quint64 gen) {
     QNetworkRequest req{QUrl(m_url)};
@@ -360,9 +372,6 @@ void StreamAudioPlayer::onHeaderReceived(QNetworkReply *reply, quint64 gen) {
     qDebug() << "[Stream] WAV:"
              << m_info.sampleRate << "Hz,"
              << m_info.channels << "ch,"
-             << "formatCode:" << QString("0x%1").arg(m_info.formatCode, 4, 16, QChar('0'))
-             << "container:" << m_info.containerBits << "bit,"
-             << "dataStart:" << m_info.dataStart
              << "dataSize:" << m_info.dataSize / 1024 / 1024 << "MB,"
              << "duration:" << m_durationMs / 1000 << "s";
 
@@ -375,7 +384,6 @@ void StreamAudioPlayer::onHeaderReceived(QNetworkReply *reply, quint64 gen) {
     }
 
     m_nextFetchPos = m_info.dataStart;
-    m_nextWritePos = m_info.dataStart;
     m_seekBaseMs = 0;
     m_positionTimer.start();
     fetchChunk(gen);
@@ -414,7 +422,7 @@ bool StreamAudioPlayer::setupSink(quint64 gen) {
     m_sink = new QAudioSink(device, m_format, this);
 
     QAudioFormat actual = m_sink->format();
-    qDebug() << "[Stream] actual sink format:"
+    qDebug() << "[Stream] sink format:"
              << actual.sampleRate() << "Hz,"
              << actual.channelCount() << "ch,"
              << actual.sampleFormat();
@@ -444,6 +452,10 @@ void StreamAudioPlayer::startSinkAndFlush() {
         return;
     }
 
+    // 鼓点检测用实际生效的音频格式
+    m_beat.setFormat(m_format);
+    m_lastLevel = -1.0f;
+
     {
         int bytesPerFrame = m_format.channelCount() * m_format.bytesPerSample();
         int frames = m_info.sampleRate / 100;
@@ -454,108 +466,74 @@ void StreamAudioPlayer::startSinkAndFlush() {
 
     flushPendingData();
 
-    qDebug() << "[Stream] sink started, state:" << (int)m_sink->state()
-             << "pending:" << m_pendingData.size() / 1024 << "KB";
+    qDebug() << "[Stream] sink started, pending:" << m_pendingData.size() / 1024 << "KB";
 }
 
 // ============================================================
-// ★ fetchChunk：并发发起最多 MAX_IN_FLIGHT 个请求
+// ★ fetchChunk —— 单路顺序：任何时刻最多 1 个请求
 // ============================================================
 void StreamAudioPlayer::fetchChunk(quint64 gen) {
     if (gen != m_generation) return;
     if (!m_active) return;
+    if (m_activeReply) return;   // 已有请求在飞，等待
+    if (m_pendingData.size() >= MAX_PENDING) return;
 
     qint64 end = m_info.dataStart + m_info.dataSize;
+    if (m_nextFetchPos >= end) return;
 
-    // 内存压力检查：pendingData + 在飞请求估算
-    qint64 estimatedPending = m_pendingData.size()
-                            + m_orderedChunks.size() * CHUNK_SIZE
-                            + m_inFlight.size() * CHUNK_SIZE;
-    if (estimatedPending >= MAX_PENDING) return;
+    qint64 remain = end - m_nextFetchPos;
+    qint64 size = qMin((qint64)CHUNK_SIZE, remain);
+    qint64 startPos = m_nextFetchPos;
 
-    // 发新请求直到 MAX_IN_FLIGHT
-    while (m_inFlight.size() < MAX_IN_FLIGHT) {
-        if (m_nextFetchPos >= end) break;
+    QNetworkRequest req{QUrl(m_url)};
+    req.setHeader(QNetworkRequest::UserAgentHeader, kUserAgent);
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    req.setRawHeader("Range",
+        QString("bytes=%1-%2")
+            .arg(startPos)
+            .arg(startPos + size - 1)
+            .toUtf8());
 
-        qint64 remain = end - m_nextFetchPos;
-        qint64 size = qMin((qint64)CHUNK_SIZE, remain);
-        qint64 startPos = m_nextFetchPos;
-        m_nextFetchPos += size;
+    auto *reply = m_net->get(req);
+    m_activeReply = reply;
 
-        QNetworkRequest req{QUrl(m_url)};
-        req.setHeader(QNetworkRequest::UserAgentHeader, kUserAgent);
-        req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
-        req.setRawHeader("Range",
-            QString("bytes=%1-%2")
-                .arg(startPos)
-                .arg(startPos + size - 1)
-                .toUtf8());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, gen]() {
+        reply->deleteLater();
+        if (m_activeReply == reply) m_activeReply = nullptr;
 
-        auto *reply = m_net->get(req);
-        m_inFlight.append(reply);
+        if (gen != m_generation) return;
+        if (!m_active) return;
 
-        qDebug() << "[Stream] fetch chunk:" << size / 1024 << "KB at"
-                 << startPos / 1024 << "KB"
-                 << "(in-flight:" << m_inFlight.size() << ")";
-
-        connect(reply, &QNetworkReply::finished, this,
-                [this, reply, gen, startPos]() {
-            reply->deleteLater();
-            if (m_inFlight.contains(reply)) m_inFlight.removeOne(reply);
-
-            if (gen != m_generation) return;
-            if (!m_active) return;
-
-            onChunkReply(reply, gen, startPos);
-        });
-    }
+        onChunkReceived(reply, gen);
+    });
 }
 
-// ============================================================
-// ★ 单个 chunk 返回：按 startPos 排序，顺序写入
-// ============================================================
-void StreamAudioPlayer::onChunkReply(QNetworkReply *reply, quint64 gen,
-                                      qint64 startPos) {
+void StreamAudioPlayer::onChunkReceived(QNetworkReply *reply, quint64 gen) {
     if (gen != m_generation) return;
 
     if (reply->error() != QNetworkReply::NoError) {
-        qWarning() << "[Stream] chunk failed at" << startPos
-                   << ":" << reply->errorString();
-        // 播放中断
-        m_active = false;
-        m_playing = false;
-        m_positionTimer.stop();
-        emit playbackStateChanged(false);
-        emit trackFinished();
+        qWarning() << "[Stream] chunk failed:" << reply->errorString();
+        if (m_active) {
+            // 重试
+            QTimer::singleShot(500, this, [this, gen]() {
+                if (gen == m_generation && m_active) fetchChunk(gen);
+            });
+        }
         return;
     }
 
-    QByteArray data = reply->readAll();
-    if (data.isEmpty()) {
+    QByteArray raw = reply->readAll();
+    if (raw.isEmpty()) {
         fetchChunk(gen);
         return;
     }
 
-    m_orderedChunks.insert(startPos, data);
-    drainOrderedChunks();
+    m_nextFetchPos += raw.size();
+    writeToSink(raw);
 
-    // 继续拉
-    fetchChunk(gen);
-}
-
-// ============================================================
-// ★ 按序把 orderedChunks 写入 sink
-// ============================================================
-void StreamAudioPlayer::drainOrderedChunks() {
-    while (!m_orderedChunks.isEmpty()) {
-        auto it = m_orderedChunks.find(m_nextWritePos);
-        if (it == m_orderedChunks.end()) break;
-
-        QByteArray chunk = it.value();
-        m_orderedChunks.erase(it);
-
-        writeToSink(chunk);
-        m_nextWritePos += chunk.size();
+    // 拉下一块
+    if (m_active && m_nextFetchPos < m_info.dataStart + m_info.dataSize) {
+        fetchChunk(gen);
     }
 }
 
@@ -606,6 +584,18 @@ void StreamAudioPlayer::writeToSink(const QByteArray &raw) {
     }
 
     if (pcm.isEmpty()) return;
+
+    // 鼓点 / 响度检测：直接吃即将写进音频设备的 PCM
+    {
+        float level = 0.0f;
+        const bool isBeat = m_beat.feed(pcm.constData(), pcm.size(),
+                                        m_clock.elapsed(), level);
+        if (std::abs(level - m_lastLevel) >= 0.004f) {
+            m_lastLevel = level;
+            emit levelChanged(level);
+        }
+        if (isBeat) emit beat(m_beat.strength());
+    }
 
     int bytesPerSample = m_format.bytesPerSample();
     int frameBytes = m_format.channelCount() * bytesPerSample;
@@ -664,7 +654,7 @@ void StreamAudioPlayer::onSinkStateChanged(int stateInt) {
         if (!m_buffering && !m_playing && !m_paused) {
             m_playing = true;
             emit playbackStateChanged(true);
-            qDebug() << "[Stream] playing (sink Active)";
+            qDebug() << "[Stream] playing";
         }
         if (!m_pendingData.isEmpty()) flushPendingData();
         break;
@@ -673,10 +663,7 @@ void StreamAudioPlayer::onSinkStateChanged(int stateInt) {
         if (!m_pendingData.isEmpty()) { flushPendingData(); break; }
         if (m_active) {
             qint64 end = m_info.dataStart + m_info.dataSize;
-            bool allFetched = (m_nextFetchPos >= end)
-                           && m_inFlight.isEmpty()
-                           && m_orderedChunks.isEmpty();
-            if (allFetched && m_pendingData.isEmpty()) {
+            if (m_nextFetchPos >= end && !m_activeReply) {
                 qDebug() << "[Stream] finished";
                 m_active = false;
                 m_playing = false;
@@ -684,7 +671,7 @@ void StreamAudioPlayer::onSinkStateChanged(int stateInt) {
                 emit playbackStateChanged(false);
                 emit trackFinished();
             } else {
-                fetchChunk(m_generation);
+                if (!m_activeReply) fetchChunk(m_generation);
             }
         }
         break;
@@ -712,13 +699,16 @@ void StreamAudioPlayer::updatePosition() {
     qint64 pos = position();
     emit positionChanged(pos);
 
-    // pendingData 低于水位线 → 拉更多
-    if (m_pendingData.size() < LOW_WATERMARK
-        || m_orderedChunks.isEmpty() == false) {
-        fetchChunk(m_generation);
+    // pendingData 不足 → 继续拉
+    if (!m_activeReply && m_pendingData.size() < LOW_WATERMARK) {
+        qint64 end = m_info.dataStart + m_info.dataSize;
+        if (m_nextFetchPos < end) fetchChunk(m_generation);
     }
 }
 
+// ============================================================
+// parseWavHeader
+// ============================================================
 bool StreamAudioPlayer::parseWavHeader(const QByteArray &buf, WavInfo &out) {
     if (buf.size() < 12) return false;
     if (!buf.startsWith("RIFF")) return false;

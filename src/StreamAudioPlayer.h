@@ -4,9 +4,9 @@
 #include <QByteArray>
 #include <QAudioFormat>
 #include <QTimer>
+#include <QElapsedTimer>
 #include <QPointer>
-#include <QList>
-#include <QMap>
+#include "BeatDetector.h"
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -36,6 +36,9 @@ signals:
     void playbackStateChanged(bool playing);
     void bufferingChanged(bool buffering);
     void trackFinished();
+    // 鼓点 / 平滑响度（供全屏播放器背景起伏）
+    void beat(float strength);
+    void levelChanged(float level);
 
 private:
     struct WavInfo {
@@ -58,12 +61,7 @@ private:
     QString      m_url;
     WavInfo      m_info;
 
-    // ---------- 并发拉取 ----------
     qint64 m_nextFetchPos = 0;
-    qint64 m_nextWritePos = 0;
-    QList<QNetworkReply*>    m_inFlight;
-    QMap<qint64, QByteArray> m_orderedChunks;
-
     qint64 m_bytesWritten = 0;
     qint64 m_durationMs   = 0;
     qint64 m_seekBaseMs   = 0;
@@ -81,14 +79,25 @@ private:
 
     quint64 m_generation = 0;
 
+    BeatDetector    m_beat;
+    QElapsedTimer   m_clock;
+    float           m_lastLevel = -1.0f;
+
+    QPointer<QNetworkReply> m_activeReply;
     QTimer m_positionTimer;
 
-    static constexpr int CHUNK_SIZE       = 512 * 1024;
+    // ============================================================
+    // 参数：单路顺序拉取
+    //
+    //   CHUNK_SIZE = 1 MB → 每个 chunk 够播 ~2.6 秒
+    //   PREBUFFER  = 512 KB → 预缓冲 ~1.3 秒后开始播
+    //   MAX_PENDING = 3 MB → 内存中最多 8 秒数据
+    // ============================================================
+    static constexpr int CHUNK_SIZE       = 1024 * 1024;
     static constexpr int PREBUFFER_BYTES  = 512 * 1024;
     static constexpr int LOW_WATERMARK    = 1024 * 1024;
     static constexpr int SINK_BUFFER_SIZE = 2 * 1024 * 1024;
-    static constexpr int MAX_PENDING      = 6 * 1024 * 1024;
-    static constexpr int MAX_IN_FLIGHT    = 3;
+    static constexpr int MAX_PENDING      = 3 * 1024 * 1024;
 
     int frameBytes() const {
         int cb = m_info.containerBits > 0 ? m_info.containerBits : 32;
@@ -104,9 +113,7 @@ private:
     bool setupSink(quint64 gen);
     void startSinkAndFlush();
     void fetchChunk(quint64 gen);
-    void onChunkReply(QNetworkReply *reply, quint64 gen, qint64 startPos);
-    void drainOrderedChunks();
-    void abortAllInFlight();
+    void onChunkReceived(QNetworkReply *reply, quint64 gen);
     void writeToSink(const QByteArray &raw);
     void flushPendingData();
     void updatePosition();
